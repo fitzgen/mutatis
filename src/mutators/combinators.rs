@@ -357,6 +357,8 @@ pub struct Just<T> {
 /// This is useful for providing base cases that feed into other mutator
 /// combinators, like [`one_of`].
 ///
+/// This mutator is never exhausted.
+///
 /// # Example
 ///
 /// ```

@@ -51,15 +51,18 @@ simplify writing these custom mutation hooks.
 
 There are two primary components to this library:
 
-1. **The `mutatis::Mutator` trait.** A trait that is implemented by types which
-   can mutate other types. The `mutatis::Mutator::mutate` trait method takes a
-   value and mutates it. You can think of a `mutatis::Mutator` implementation
-   like a streaming iterator that takes as input and modifies items, rather than
-   generating them from scratch and returning them.
+1. **[The `mutatis::Mutator`
+   trait.](https://docs.rs/mutatis/latest/mutatis/trait.Mutator.html)** A trait
+   that is implemented by types which can mutate other types. The
+   `mutatis::Mutator::mutate` trait method takes a value and mutates it. You can
+   think of a `mutatis::Mutator` implementation like a streaming iterator that
+   takes as input and modifies items, rather than generating them from scratch
+   and returning them.
 
-2. **The `mutatis::mutators` module.** This module, idiomatically imported with
-   `use mutatis::mutators as m`, provides a set of types and combinators for
-   building custom mutators.
+2. **[The `mutatis::mutators`
+   module.](https://docs.rs/mutatis/latest/mutatis/mutators/index.html)** This
+   module, idiomatically imported via `use mutatis::mutators as m`, provides a
+   types and combinators for building custom mutators.
 
 Here's an example of using `mutatis` to define a custom mutator for a simple
 data structure:
@@ -109,8 +112,8 @@ for _ in 0..5 {
 
 ### Automatically Deriving Mutators with `#[derive(Mutator)]`
 
-If you enable this crate's `derive` cargo feature, then you can automatically
-derive mutators for your type definitions.
+If you enable this crate's `derive` feature, then you can automatically derive
+mutators for your type definitions.
 
 First, enable the `derive` feature in `Cargo.toml`:
 
@@ -457,10 +460,11 @@ for _ in 0..3 {
 
 ### Writing Smoke Tests with `mutatis::check`
 
-When you enable the `check` feature in `Cargo.toml`, the `mutatis::check` module
-provides a tiny property-based testing framework that is suitable for writing
-smoke tests. It is not intended to replace a full-fledged fuzzing engine that
-you'd use for in-depth, 24/7 fuzzing.
+When you enable the `check` feature in `Cargo.toml`, [the `mutatis::check`
+module](https://docs.rs/mutatis/latest/mutatis/check/index.html) provides a tiny
+property-based testing framework that is suitable for writing smoke tests. It is
+not intended to replace a full-fledged fuzzing engine that you'd use for
+in-depth, 24/7 fuzzing.
 
 ```rust
 #[cfg(all(test, feature = "check"))]
@@ -469,7 +473,7 @@ mod tests {
 
     #[test]
     fn test_that_addition_commutes() {
-        let result = Check::new()
+        Check::new()
             .iters(1000)
             .shrink_iters(1000)
             .run_with_defaults(|(a, b): &(i32, i32)| {
@@ -478,11 +482,15 @@ mod tests {
                 } else {
                     Err("addition is not commutative!")
                 }
-            });
-        assert!(result.is_ok());
+            })
+            .unwrap();
     }
 }
 ```
+
+See [the module
+documentation](https://docs.rs/mutatis/latest/mutatis/check/index.html) for more
+details.
 
 ## Cargo Features
 

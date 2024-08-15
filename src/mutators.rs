@@ -53,22 +53,16 @@ pub fn bool() -> Bool {
     Bool { bits: 0 }
 }
 
-impl Bool {
-    fn do_mutation(&mut self, b: &mut bool) -> crate::Result<()> {
-        let mask = 1 << (*b as u8);
+impl Mutator<bool> for Bool {
+    #[inline]
+    fn mutate(&mut self, _context: &mut MutationContext, value: &mut bool) -> crate::Result<()> {
+        let mask = 1 << (*value as u8);
         if self.bits & mask == mask {
             return Err(Error::mutator_exhausted());
         }
         self.bits |= mask;
-        *b = !*b;
+        *value = !*value;
         Ok(())
-    }
-}
-
-impl Mutator<bool> for Bool {
-    #[inline]
-    fn mutate(&mut self, _context: &mut MutationContext, value: &mut bool) -> crate::Result<()> {
-        self.do_mutation(value)
     }
 }
 
