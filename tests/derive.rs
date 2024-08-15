@@ -1,4 +1,4 @@
-#![cfg(feature = "derive")]
+#![cfg(all(feature = "derive", feature = "std"))]
 
 use mutatis::{mutators as m, DefaultMutator, MutationContext, Mutator};
 
