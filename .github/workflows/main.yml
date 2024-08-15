@@ -17,7 +17,7 @@ jobs:
     - name: Install `rustup`
       run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile=minimal
     - name: Install the latest stable Rust
-      run: rustup install stable --component rustfmt && rustup default stable
+      run: rustup toolchain install stable --component rustfmt && rustup default stable
     - uses: actions/checkout@v4
     - run: cargo fmt --all -- --check
 
@@ -30,7 +30,7 @@ jobs:
     - name: Install `rustup`
       run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile=minimal
     - name: Install Rust channel
-      run: rustup install ${{matrix.rust_channel}} && rustup default ${{matrix.rust}}
+      run: rustup toolchain install ${{matrix.rust}} && rustup default ${{matrix.rust}}
     - uses: actions/checkout@v4
     - run: cargo test --verbose
     - run: cargo test --verbose --features alloc
@@ -49,4 +49,4 @@ jobs:
     - name: Install MIRI
       run: rustup toolchain install nightly --allow-downgrade --profile minimal --component miri
     - uses: actions/checkout@v4
-    - run: cargo miri test --all-features
+    - run: cargo +nightly miri test --all-features
