@@ -168,7 +168,8 @@ for _ in 0..5 {
 ```
 
 The generated mutator also has a constructor that takes sub-mutators for each
-field of the input type:
+field of the input type, which allows you to customize how each field is
+mutated:
 
 ```rust
 # fn foo() -> mutatis::Result<()> {
