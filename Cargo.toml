@@ -27,7 +27,7 @@ std = ["alloc"]
 
 # Enable the `mutatis::check` module, which provides a small framework for
 # property-based testing built on top of `mutatis::Mutator`.
-check = ["std"]
+check = ["std", "dep:log"]
 
 # Enable the `derive(Mutator)` macro for automatically deriving `Mutator`
 # implementations for custom types.
@@ -39,9 +39,11 @@ all-features = true
 [dependencies]
 rand = { version = "0.8.5", default-features = false, features = ["small_rng"] }
 mutatis-derive = { version = "=0.1.0", path = "derive", optional = true }
+log = { version = "0.4.22", optional = true }
 
 [dev-dependencies]
 anyhow = "1.0.86"
+env_logger = "0.11.5"
 libfuzzer-sys = "0.4.7"
 
 [workspace]
