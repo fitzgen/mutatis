@@ -20,7 +20,7 @@ jobs:
       run: rustup install stable --component rustfmt && rustup default stable
     - uses: actions/checkout@v4
     - run: cargo fmt --all -- --check
-  
+
   test:
     strategy:
       matrix:
@@ -36,6 +36,7 @@ jobs:
     - run: cargo test --verbose --features alloc
     - run: cargo test --verbose --features std
     - run: cargo test --verbose --features check
+    - run: cargo test --verbose --features derive
     - run: cargo test --verbose --all-features
 
   miri:

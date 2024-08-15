@@ -1,0 +1,21 @@
+[package]
+authors = ["Nick Fitzgerald <fitzgen@gmail.com>"]
+description = "Implementation of `derive(mutatis::Mutator)`. Use this via the `derive` feature of the `mutatis` crate, rather than by depending on this crate directly."
+edition = "2021"
+license = "MIT OR Apache-2.0"
+name = "mutatis-derive"
+
+# XXX: Keep this in sync with the version in `Cargo.toml`.
+version = "0.1.0"
+
+# XXX: Keep this in sync with the MSRV documented in `README.md` and the
+# `rust-version` in `derive/Cargo.toml`.
+rust-version = "1.80.0"
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2", features = ['derive', 'parsing'] }
+
+[lib]
+proc-macro = true
