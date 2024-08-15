@@ -105,7 +105,6 @@ for _ in 0..5 {
 //     mutated monster is Monster { hp: 61108, is_ghost: false, pos: [-1166784619, -8] }
 # Ok(())
 # }
-# let _ = foo();
 ```
 
 ### Automatically Deriving Mutators with `#[derive(Mutator)]`
@@ -123,8 +122,8 @@ mutatis = { ..., features = ["derive"] }
 Then simply slap `#[derive(Mutator)]` onto your type definitions:
 
 ```rust
-#![cfg(feature = "derive")]
 # fn foo() -> mutatis::Result<()> {
+#![cfg(feature = "derive")]
 use mutatis::{mutators as m, MutationContext, Mutator};
 
 /// A silly monster type that derives `Mutator`.
@@ -163,15 +162,14 @@ for _ in 0..5 {
 //     mutated monster is Monster { hp: 37582, is_ghost: true, pos: [42, 1443194178] }
 # Ok(())
 # }
-# let _ = foo();
 ```
 
 The generated mutator also has a constructor that takes sub-mutators for each
 field of the input type:
 
 ```rust
-#![cfg(feature = "derive")]
 # fn foo() -> mutatis::Result<()> {
+#![cfg(feature = "derive")]
 use mutatis::{mutators as m, MutationContext, Mutator};
 
 #[derive(Debug, Mutator)]
@@ -197,7 +195,6 @@ for _ in 0..5 {
 //     mutated value is MyType(35, 24)
 # Ok(())
 # }
-# foo().unwrap();
 ```
 
 #### Container Attributes
@@ -271,7 +268,8 @@ fuzz mutator converts the fuzzer's bytes into an RGB color, mutates the RGB
 color, and then updates the fuzzer's test case based on the mutated RGB color.
 
 ```rust,no_run
-#![cfg(feature = "derive")]
+#[cfg(feature = "derive")]
+# mod example {
 use libfuzzer_sys::{fuzzer_mutate, fuzz_mutator, fuzz_target};
 use mutatis::{mutators as m, MutationContext, Mutator};
 
@@ -352,6 +350,7 @@ fuzz_mutator!(|data: &mut [u8], size: usize, max_size: usize, seed: u32| {
     data[..new_size].copy_from_slice(&bytes[..new_size]);
     new_size
 });
+# }
 ```
 
 ### Shrinking Test Cases

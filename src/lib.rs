@@ -140,6 +140,7 @@ impl MutationContext {
 ///
 /// ```
 /// # fn foo() -> mutatis::Result<()> {
+/// # #![cfg(feature = "std")]
 /// use mutatis::{mutators as m, MutationContext, Mutator};
 ///
 /// // Define a mutator.
@@ -167,7 +168,6 @@ impl MutationContext {
 /// //     mutated x is 3751781284
 /// # Ok(())
 /// # }
-/// # foo().unwrap();
 /// ```
 ///
 /// # Exhaustion
@@ -192,6 +192,8 @@ impl MutationContext {
 /// are not defined by your own crate).
 ///
 /// ```
+/// # fn foo () {
+/// # #![cfg(feature = "derive")]
 /// use mutatis::{mutators as m, MutationContext, Mutator, Result};
 ///
 /// #[derive(Mutator)] // derive a default Mutator
@@ -216,6 +218,7 @@ impl MutationContext {
 ///         Ok(())
 ///     }
 /// }
+/// # }
 /// ```
 pub trait Mutator<T>
 where
@@ -351,8 +354,8 @@ where
     /// # Example
     ///
     /// ```
-    /// #![cfg(feature = "std")]
     /// # fn foo() -> mutatis::Result<()> {
+    /// # #![cfg(feature = "std")]
     /// use mutatis::{mutators as m, MutationContext, Mutator};
     ///
     /// let mut context = MutationContext::default();
@@ -372,7 +375,6 @@ where
     /// assert_eq!(counter, 3, "the mutator was invoked 3 times");
     /// # Ok(())
     /// # }
-    /// # foo().unwrap()
     /// ```
     #[inline]
     #[must_use = "mutator combinators do nothing until you call their `mutate` method"]
