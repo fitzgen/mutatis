@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 name = "mutatis-derive"
 
 # XXX: Keep this in sync with the version in `Cargo.toml`.
-version = "0.1.0"
+version = "0.2.0"
 
 # XXX: Keep this in sync with the MSRV documented in `README.md` and the
 # `rust-version` in `derive/Cargo.toml`.
