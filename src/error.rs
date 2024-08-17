@@ -8,29 +8,28 @@ pub type Result<T, E = Error> = core::result::Result<T, E>;
 /// An extension trait for [`mutatis::Result`][crate::Result] that provides
 /// additional methods.
 pub trait ResultExt {
-    /// Ignores the error if it is
-    /// [`MutatorExhausted`][ErrorKind::MutatorExhausted], returning `Ok(())`
-    /// instead.
+    /// Ignores the error if it is [`Exhausted`][ErrorKind::Exhausted],
+    /// returning `Ok(())` instead.
     ///
     /// # Examples
     ///
     /// ```
     /// use mutatis::{Error, Result, ResultExt};
     ///
-    /// let result: Result<()> = Err(Error::mutator_exhausted());
-    /// let result = result.ignore_mutator_exhausted();
+    /// let result: Result<()> = Err(Error::exhausted());
+    /// let result = result.ignore_exhausted();
     /// assert!(result.is_ok());
     /// ```
-    fn ignore_mutator_exhausted(self) -> Result<()>;
+    fn ignore_exhausted(self) -> Result<()>;
 }
 
 impl<T> ResultExt for Result<T> {
     #[inline]
-    fn ignore_mutator_exhausted(self) -> Result<()> {
+    fn ignore_exhausted(self) -> Result<()> {
         match self {
             Ok(_) => Ok(()),
             Err(err) => {
-                if err.is_mutator_exhausted() {
+                if err.is_exhausted() {
                     Ok(())
                 } else {
                     Err(err)
@@ -38,6 +37,20 @@ impl<T> ResultExt for Result<T> {
             }
         }
     }
+}
+
+enum ErrorInner {
+    // When we can, box the inner error kind to save space in the `Error`
+    // struct. This is only possible when the `alloc` feature is enabled.
+    #[cfg(feature = "alloc")]
+    Kind(alloc::boxed::Box<ErrorKind>),
+    #[cfg(not(feature = "alloc"))]
+    Kind(ErrorKind),
+
+    /// For internal usage only: break out of and early exit from the mutation
+    /// loop, after we've already applied our chosen mutation. This isn't an
+    /// `ErrorKind` because we don't want to allocate for this variant.
+    EarlyExit,
 }
 
 /// An error that can occur when using the `mutatis` crate.
@@ -52,26 +65,23 @@ impl<T> ResultExt for Result<T> {
 ///
 /// let error: Error = {
 ///     // ...
-/// #   Error::mutator_exhausted()
+/// #   Error::exhausted()
 /// };
 ///
-/// if error.is_mutator_exhausted() {
+/// if error.is_exhausted() {
 ///     println!("exhausted!");
 /// }
 ///
 /// match error.kind() {
-///     ErrorKind::MutatorExhausted => println!("still exhausted!"),
+///     ErrorKind::Exhausted => println!("still exhausted!"),
 ///     ErrorKind::Other(msg) => println!("other! {msg}"),
+///
+///     // The `ErrorKind` type is not exhaustive, so we always need a catch-all arm.
 ///     unknown => println!("unknown! {unknown:?}"),
 /// }
 /// ```
 pub struct Error {
-    // When we can, box the inner error kind to save space in the `Error`
-    // struct. This is only possible when the `alloc` feature is enabled.
-    #[cfg(feature = "alloc")]
-    kind: alloc::boxed::Box<ErrorKind>,
-    #[cfg(not(feature = "alloc"))]
-    kind: ErrorKind,
+    inner: ErrorInner,
 }
 
 impl From<ErrorKind> for Error {
@@ -79,21 +89,32 @@ impl From<ErrorKind> for Error {
     fn from(kind: ErrorKind) -> Self {
         #[cfg(feature = "alloc")]
         let kind = alloc::boxed::Box::new(kind);
-        Self { kind }
+        Self {
+            inner: ErrorInner::Kind(kind),
+        }
     }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.kind() {
-            ErrorKind::MutatorExhausted => {
-                write!(f, "the mutator is exhausted")
+        match &self.inner {
+            ErrorInner::Kind(kind) => {
+                #[cfg(feature = "alloc")]
+                let kind = &**kind;
+                match kind {
+                    ErrorKind::Exhausted => {
+                        write!(f, "the mutator is exhausted")
+                    }
+                    ErrorKind::InvalidRange => {
+                        write!(f, "the mutator was given an invalid range")
+                    }
+                    ErrorKind::Other(msg) => {
+                        write!(f, "an unknown error occurred: {msg}")
+                    }
+                }
             }
-            ErrorKind::InvalidRange => {
-                write!(f, "the mutator was given an invalid range")
-            }
-            ErrorKind::Other(msg) => {
-                write!(f, "an unknown error occurred: {msg}")
+            ErrorInner::EarlyExit => {
+                write!(f, "internal error variant: early exit from mutation loop")
             }
         }
     }
@@ -109,10 +130,22 @@ impl fmt::Debug for Error {
 impl std::error::Error for Error {}
 
 impl Error {
+    #[inline]
+    pub(crate) fn early_exit() -> Self {
+        Self {
+            inner: ErrorInner::EarlyExit,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn is_early_exit(&self) -> bool {
+        matches!(self.inner, ErrorInner::EarlyExit)
+    }
+
     /// Returns a new error indicating that the mutator is exhausted.
     #[must_use]
-    pub fn mutator_exhausted() -> Self {
-        ErrorKind::MutatorExhausted.into()
+    pub fn exhausted() -> Self {
+        ErrorKind::Exhausted.into()
     }
 
     /// Returns a new error indicating that the given range is invalid.
@@ -130,14 +163,17 @@ impl Error {
     /// Returns the kind of this error.
     #[must_use]
     pub fn kind(&self) -> &ErrorKind {
-        return &self.kind;
+        match &self.inner {
+            ErrorInner::Kind(kind) => kind,
+            ErrorInner::EarlyExit => unreachable!(),
+        }
     }
 
     /// Returns `true` if the error's kind is
-    /// [`MutatorExhausted`][ErrorKind::MutatorExhausted].
+    /// [`Exhausted`][ErrorKind::Exhausted].
     #[must_use]
-    pub fn is_mutator_exhausted(&self) -> bool {
-        matches!(self.kind(), ErrorKind::MutatorExhausted)
+    pub fn is_exhausted(&self) -> bool {
+        matches!(self.kind(), ErrorKind::Exhausted)
     }
 
     /// Returns `true` if the error's kind is
@@ -168,11 +204,11 @@ impl Error {
 ///
 /// let error: Error = {
 ///     // ...
-/// #   Error::mutator_exhausted()
+/// #   Error::exhausted()
 /// };
 ///
 /// match error.kind() {
-///     ErrorKind::MutatorExhausted => println!("exhausted!"),
+///     ErrorKind::Exhausted => println!("exhausted!"),
 ///     ErrorKind::Other(msg) => println!("other! {msg}"),
 ///     unknown => println!("unknown! {unknown:?}"),
 /// }
@@ -181,7 +217,7 @@ impl Error {
 #[derive(Debug)]
 pub enum ErrorKind {
     /// The mutator is exhausted.
-    MutatorExhausted,
+    Exhausted,
 
     /// The mutator was given an invalid range.
     InvalidRange,
@@ -193,10 +229,14 @@ pub enum ErrorKind {
 impl From<Error> for ErrorKind {
     #[inline]
     fn from(err: Error) -> Self {
-        #[cfg(feature = "alloc")]
-        return *err.kind;
-        #[cfg(not(feature = "alloc"))]
-        return err.kind;
+        match err.inner {
+            #[cfg(feature = "alloc")]
+            ErrorInner::Kind(kind) => *kind,
+            #[cfg(not(feature = "alloc"))]
+            ErrorInner::Kind(kind) => kind,
+
+            ErrorInner::EarlyExit => unreachable!(),
+        }
     }
 }
 

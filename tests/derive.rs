@@ -1,99 +1,96 @@
 #![cfg(all(feature = "derive", feature = "std"))]
 
-use mutatis::{mutators as m, DefaultMutator, MutationContext, Mutator};
+use mutatis::{mutators as m, DefaultMutate, Mutate, MutationBuilder, ResultExt};
 
 #[test]
 fn derive_on_struct_with_named_fields() -> anyhow::Result<()> {
-    #[derive(Debug, Default, Mutator)]
+    #[derive(Debug, Default, Mutate)]
     struct MyStruct {
         x: u8,
         y: bool,
     }
 
-    let mut context = MutationContext::default();
-    let mut mutator = m::default::<MyStruct>();
+    let mut mtn = MutationBuilder::new();
     let mut value = MyStruct::default();
-    mutator.mutate(&mut context, &mut value)?;
+    mtn.mutate(&mut value)?;
     Ok(())
 }
 
 #[test]
 fn derive_on_struct_with_unnamed_fields() -> anyhow::Result<()> {
-    #[derive(Debug, Default, Mutator)]
+    #[derive(Debug, Default, Mutate)]
     struct MyStruct(u8, bool);
 
-    let mut context = MutationContext::default();
-    let mut mutator = m::default::<MyStruct>();
+    let mut mtn = MutationBuilder::new();
     let mut value = MyStruct::default();
-    mutator.mutate(&mut context, &mut value)?;
+    mtn.mutate(&mut value)?;
     Ok(())
 }
 
 #[test]
 fn derive_on_unit_struct() -> anyhow::Result<()> {
-    #[derive(Debug, Default, Mutator)]
+    #[derive(Debug, Default, Mutate)]
     struct MyUnitStruct;
 
-    let mut context = MutationContext::default();
-    let mut mutator = m::default::<MyUnitStruct>();
+    let mut mtn = MutationBuilder::new();
     let mut value = MyUnitStruct::default();
-    mutator.mutate(&mut context, &mut value)?;
+    mtn.mutate(&mut value).ignore_exhausted()?;
     Ok(())
 }
 
 #[test]
 fn derive_on_enum() -> anyhow::Result<()> {
-    #[derive(Debug, Mutator)]
+    #[derive(Debug, Mutate)]
     enum MyEnum {
         Unit,
         Unnamed(u8, bool),
         Named { x: u8, y: bool },
     }
 
-    let mut context = MutationContext::default();
-    let mut mutator = m::default::<MyEnum>();
+    let mut mtn = MutationBuilder::new();
 
     let mut value = MyEnum::Unit;
-    mutator.mutate(&mut context, &mut value)?;
+    mtn.mutate(&mut value)
+        // TODO: support mutating from one enum variant to another
+        .ignore_exhausted()?;
 
     let mut value = MyEnum::Unnamed(0, false);
-    mutator.mutate(&mut context, &mut value)?;
+    mtn.mutate(&mut value)?;
 
     let mut value = MyEnum::Named { x: 0, y: false };
-    mutator.mutate(&mut context, &mut value)?;
+    mtn.mutate(&mut value)?;
 
     Ok(())
 }
 
 #[test]
 fn mutator_name() -> anyhow::Result<()> {
-    #[derive(Debug, Default, Mutator)]
-    #[mutatis(mutator_name = MyMutator)]
-    struct MyStruct;
+    #[derive(Debug, Default, Mutate)]
+    #[mutatis(mutator_name = MyCoolMutator)]
+    struct MyStruct(u8);
 
-    let mut context = MutationContext::default();
-    let mut mutator = MyMutator::default();
+    let mut mtn = MutationBuilder::new();
+    let mut mutator = MyCoolMutator::new(m::u8());
     let mut value = MyStruct::default();
-    mutator.mutate(&mut context, &mut value)?;
+    mtn.mutate_with(&mut mutator, &mut value)?;
     Ok(())
 }
 
 #[test]
 fn mutator_doc() -> anyhow::Result<()> {
-    #[derive(Debug, Default, Mutator)]
+    #[derive(Debug, Default, Mutate)]
     #[mutatis(mutator_doc = "This is a cool mutator")]
-    struct MyStruct;
+    struct MyStruct(u8);
 
-    let mut context = MutationContext::default();
-    let mut mutator = m::default::<MyStruct>();
+    let mut mtn = MutationBuilder::new();
     let mut value = MyStruct::default();
-    mutator.mutate(&mut context, &mut value)?;
+    mtn.mutate(&mut value)?;
     Ok(())
 }
 
 #[test]
 fn ignore_field() -> anyhow::Result<()> {
-    #[derive(Clone, Debug, Default, PartialEq, Eq, Mutator)]
+    #[derive(Clone, Debug, Default, PartialEq, Eq, Mutate)]
     struct MyStruct {
         x: u64,
 
@@ -101,14 +98,13 @@ fn ignore_field() -> anyhow::Result<()> {
         y: u64,
     }
 
-    let mut context = MutationContext::default();
-    let mut mutator = m::default::<MyStruct>();
+    let mut mtn = MutationBuilder::new();
 
     let orig = MyStruct::default();
     let mut value = orig.clone();
 
     while value == orig {
-        mutator.mutate(&mut context, &mut value)?;
+        mtn.mutate(&mut value)?;
         assert_eq!(orig.y, value.y);
     }
 
@@ -117,7 +113,7 @@ fn ignore_field() -> anyhow::Result<()> {
 
 #[test]
 fn default_mutator() -> anyhow::Result<()> {
-    #[derive(Debug, Default, Mutator)]
+    #[derive(Debug, Default, Mutate)]
     struct MyStruct {
         x: u64,
 
@@ -125,20 +121,20 @@ fn default_mutator() -> anyhow::Result<()> {
         y: u64,
     }
 
-    let mut context = MutationContext::default();
+    let mut mtn = MutationBuilder::new();
 
     // Only an `x` mutator parameter because `y` is always the default mutator.
     let mut mutator = MyStructMutator::new(m::u64());
 
     let mut value = MyStruct::default();
-    mutator.mutate(&mut context, &mut value)?;
+    mtn.mutate_with(&mut mutator, &mut value)?;
 
     Ok(())
 }
 
 #[test]
 fn derive_with_generic_parameters() -> anyhow::Result<()> {
-    #[derive(Debug, Mutator)]
+    #[derive(Debug, Mutate)]
     struct MyGenericStruct<'a, 'b: 'a, const N: usize, T: Copy, U>
     where
         U: Default,
@@ -155,8 +151,7 @@ fn derive_with_generic_parameters() -> anyhow::Result<()> {
         w: U,
     }
 
-    let mut context = MutationContext::default();
-    let mut mutator = m::default::<MyGenericStruct<'_, '_, 3, u32, i8>>();
+    let mut mtn = MutationBuilder::new();
 
     let x = 5;
     let y = 10;
@@ -164,30 +159,28 @@ fn derive_with_generic_parameters() -> anyhow::Result<()> {
     let w = 100;
     let mut value = MyGenericStruct { x: &x, y: &y, z, w };
 
-    mutator.mutate(&mut context, &mut value)?;
+    mtn.mutate(&mut value)?;
 
     Ok(())
 }
 
 #[test]
 fn no_default_mutator() -> anyhow::Result<()> {
-    #[derive(Debug, Mutator)]
+    #[derive(Debug, Mutate)]
     #[mutatis(default_mutator = false)]
     struct MyStruct {
         x: u64,
     }
 
-    // If the derive macro had emitted a `DefaultMutator` implementation, then
+    // If the derive macro had emitted a `DefaultMutate` implementation, then
     // this one would be a compile error.
-    impl DefaultMutator for MyStruct {
-        type DefaultMutator = MyStructMutator<m::U64>;
+    impl DefaultMutate for MyStruct {
+        type DefaultMutate = MyStructMutator<m::U64>;
     }
 
-    let mut context = MutationContext::default();
+    let mut mtn = MutationBuilder::new();
     let mut mutator = MyStructMutator::new(m::u64());
     let mut value = MyStruct { x: 0 };
-    mutator.mutate(&mut context, &mut value)?;
+    mtn.mutate_with(&mut mutator, &mut value)?;
     Ok(())
 }
-
-fn main() {}

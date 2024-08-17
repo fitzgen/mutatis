@@ -10,7 +10,7 @@ pub enum FieldBehavior {
 
     /// Use the default mutator to mutate this field; don't add a generic
     /// mutator type parameter for it.
-    DefaultMutator,
+    DefaultMutate,
 }
 
 impl FieldBehavior {
@@ -26,7 +26,7 @@ impl FieldBehavior {
     pub fn needs_generic(&self) -> bool {
         match self {
             FieldBehavior::GenericMutator => true,
-            FieldBehavior::DefaultMutator => false,
+            FieldBehavior::DefaultMutate => false,
         }
     }
 }
@@ -68,7 +68,7 @@ fn parse_attribute_internals(meta_list: &MetaList) -> Result<Option<FieldBehavio
     })?;
     match token.to_string().as_ref() {
         "ignore" => Ok(None),
-        "default_mutator" => Ok(Some(FieldBehavior::DefaultMutator)),
+        "default_mutator" => Ok(Some(FieldBehavior::DefaultMutate)),
         _ => {
             let msg = format!("Unknown option for #[{MUTATIS_ATTRIBUTE_NAME}]: `{token}`");
             Err(syn::Error::new(token.span(), msg))

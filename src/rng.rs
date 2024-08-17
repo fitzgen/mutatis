@@ -36,12 +36,14 @@ macro_rules! gen_methods {
 }
 
 impl Rng {
+    #[inline]
     pub(crate) fn new(seed: u64) -> Self {
         Self {
             inner: SmallRng::seed_from_u64(seed),
         }
     }
 
+    #[inline]
     pub(crate) fn inner(&mut self) -> &mut SmallRng {
         &mut self.inner
     }
@@ -55,10 +57,7 @@ impl Rng {
             return None;
         }
 
-        // https://lemire.me/blog/2016/06/30/fast-random-shuffling/
-        let random32bit = u64::from(self.gen_u32());
-        let multiresult = random32bit.wrapping_mul(u64::try_from(len).unwrap());
-        Some((multiresult >> 32) as usize)
+        Some(self.inner.gen_range(0..len))
     }
 
     /// Choose a random element from an iterator.

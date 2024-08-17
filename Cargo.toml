@@ -25,9 +25,12 @@ alloc = []
 # features that the `std` crate provides.
 std = ["alloc"]
 
+# Enable logging with the `log` crate.
+log = ["dep:log"]
+
 # Enable the `mutatis::check` module, which provides a small framework for
 # property-based testing built on top of `mutatis::Mutator`.
-check = ["std", "dep:log"]
+check = ["std", "log"]
 
 # Enable the `derive(Mutator)` macro for automatically deriving `Mutator`
 # implementations for custom types.

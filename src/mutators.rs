@@ -1,4 +1,4 @@
-//! The provided set of [`Mutator`] implementations.
+//! The provided set of [`Mutate`] implementations and combinators.
 //!
 //! It is idiomatic to import this module with the alias `m`:
 
@@ -17,21 +17,21 @@ pub use combinators::*;
 
 /// A convenience function to get the default mutator for a type.
 ///
-/// This is equivalent to `<T as DefaultMutator>::DefaultMutator::default()` but
-/// a little less wordy.
-pub fn default<T>() -> <T as DefaultMutator>::DefaultMutator
+/// This is equivalent to `<T as DefaultMutate>::DefaultMutate::default()` but a
+/// little less wordy.
+pub fn default<T>() -> <T as DefaultMutate>::DefaultMutate
 where
-    T: DefaultMutator,
+    T: DefaultMutate,
 {
-    T::DefaultMutator::default()
+    T::DefaultMutate::default()
 }
 
-/// A mutator for `bool` values.
+/// The default mutator for `bool` values.
 ///
 /// See the [`bool()`] function to create new instances and for example usage.
 #[derive(Clone, Debug, Default)]
 pub struct Bool {
-    bits: u8,
+    _private: (),
 }
 
 /// Create a new `bool` mutator.
@@ -39,35 +39,32 @@ pub struct Bool {
 /// # Example
 ///
 /// ```
-/// use mutatis::{mutators as m, Mutator, MutationContext};
+/// use mutatis::{mutators as m, Mutate, MutationBuilder};
 ///
 /// let mut mutator = m::bool();
-/// let mut context = MutationContext::default();
+/// let mut mtn = MutationBuilder::new();
 ///
 /// let mut value = true;
-/// mutator.mutate(&mut context, &mut value).unwrap();
+/// mtn.mutate_with(&mut mutator, &mut value).unwrap();
 ///
 /// assert_eq!(value, false);
 /// ```
 pub fn bool() -> Bool {
-    Bool { bits: 0 }
+    Bool { _private: () }
 }
 
-impl Mutator<bool> for Bool {
+impl Mutate<bool> for Bool {
     #[inline]
-    fn mutate(&mut self, _context: &mut MutationContext, value: &mut bool) -> crate::Result<()> {
-        let mask = 1 << (*value as u8);
-        if self.bits & mask == mask {
-            return Err(Error::mutator_exhausted());
+    fn mutate(&mut self, muts: &mut MutationSet, value: &mut bool) -> crate::Result<()> {
+        if !muts.shrink() || *value {
+            muts.mutation(|_ctx| Ok(*value = !*value))?;
         }
-        self.bits |= mask;
-        *value = !*value;
         Ok(())
     }
 }
 
-impl DefaultMutator for bool {
-    type DefaultMutator = Bool;
+impl DefaultMutate for bool {
+    type DefaultMutate = Bool;
 }
 
 macro_rules! ints {
@@ -97,16 +94,14 @@ macro_rules! ints {
             /// # Example
             ///
             /// ```
-            /// use mutatis::{mutators as m, MutationContext, Mutator};
+            /// use mutatis::{mutators as m, Mutate, MutationBuilder};
             ///
             #[doc = concat!("let mut mutator = m::", stringify!($fn_name), "();")]
             ///
-            /// let mut context = MutationContext::builder()
-            ///     .shrink(true)
-            ///     .build();
+            /// let mut mtn = MutationBuilder::new().shrink(true);
             ///
             /// let mut value = 42;
-            /// mutator.mutate(&mut context, &mut value).unwrap();
+            /// mtn.mutate_with(&mut mutator, &mut value).unwrap();
             ///
             /// assert!(value < 42);
             /// ```
@@ -114,70 +109,69 @@ macro_rules! ints {
                 $ty_name { _private: () }
             }
 
-            impl Mutator<$ty> for $ty_name {
+            impl Mutate<$ty> for $ty_name {
                 #[inline]
-                fn mutate(&mut self, context: &mut MutationContext, value: &mut $ty) -> crate::Result<()> {
-                    if context.shrink() {
-                        if *value == 0 {
-                            Err(Error::mutator_exhausted())
-                        } else {
-                            let new_value = context.rng().$method() % *value;
-                            *value = new_value;
-                            Ok(())
+                fn mutate(&mut self, muts: &mut MutationSet, value: &mut $ty) -> crate::Result<()> {
+                    if muts.shrink() {
+                        if *value != 0 {
+                            muts.mutation(|ctx| {
+                                *value = ctx.rng().inner().gen_range(0..=*value);
+                                Ok(())
+                            })?;
                         }
+                        Ok(())
                     } else {
-                        *value = context.rng().$method();
+                        muts.mutation(|ctx| Ok(*value = ctx.rng().$method()))?;
                         Ok(())
                     }
                 }
             }
 
-            impl DefaultMutator for $ty {
-                type DefaultMutator = $ty_name;
+            impl DefaultMutate for $ty {
+                type DefaultMutate = $ty_name;
             }
 
-            impl GenerativeMutator<$ty> for $ty_name {
+            impl Generate<$ty> for $ty_name {
                 #[inline]
-                fn generate(&mut self, context: &mut MutationContext) -> crate::Result<$ty> {
-                    Ok(context.rng().$method())
+                fn generate(&mut self, ctx: &mut MutationContext) -> crate::Result<$ty> {
+                    Ok(ctx.rng().$method())
                 }
             }
 
-            impl RangeMutator<$ty> for $ty_name {
+            impl MutateInRange<$ty> for $ty_name {
                 #[inline]
                 fn mutate_in_range(
                     &mut self,
-                    context: &mut MutationContext,
+                    muts: &mut MutationSet,
                     value: &mut $ty,
                     range: &ops::RangeInclusive<$ty>,
                 ) -> crate::Result<()> {
                     let start = *range.start();
                     let end = *range.end();
 
-                    let finish = |value: &mut $ty, new_value| {
+                    if start > end {
+                        return Err(Error::invalid_range());
+                    }
+
+                    if *value == start && muts.shrink() {
+                        return Ok(());
+                    }
+
+                    muts.mutation(|ctx| {
+                        let end = if ctx.shrink() {
+                            core::cmp::min(*value, end)
+                        } else {
+                            end
+                        };
+
+                        let new_value = ctx.rng().inner().gen_range(start..=end);
                         debug_assert!(
                             start <= new_value && new_value <= end,
                             "{start} <= {new_value} <= {end}",
                         );
                         *value = new_value;
                         Ok(())
-                    };
-
-                    if start > end {
-                        return Err(Error::invalid_range());
-                    }
-
-                    if *value == start && context.shrink() {
-                        return Err(Error::mutator_exhausted());
-                    }
-
-                    let end = if context.shrink() {
-                        core::cmp::min(*value, end)
-                    } else {
-                        end
-                    };
-
-                    finish(value, context.rng().inner().gen_range(start..=end))
+                    })
                 }
             }
         )*
@@ -213,14 +207,14 @@ pub struct Char {
 ///
 /// ```
 /// # fn foo() -> mutatis::Result<()> {
-/// use mutatis::{mutators as m, MutationContext, Mutator};
+/// use mutatis::{mutators as m, Mutate, MutationBuilder};
 ///
 /// let mut mutator = m::char();
-/// let mut context = MutationContext::default();
+/// let mut mtn = MutationBuilder::new();
 ///
 /// let mut c = 'a';
 /// for _ in 0..5 {
-///     mutator.mutate(&mut context, &mut c)?;
+///     mtn.mutate_with(&mut mutator, &mut c)?;
 ///     println!("mutated c is {c}");
 /// }
 ///
@@ -239,115 +233,111 @@ pub fn char() -> Char {
     Char { _private: () }
 }
 
-impl Mutator<char> for Char {
+impl Mutate<char> for Char {
     #[inline]
-    fn mutate(&mut self, context: &mut MutationContext, value: &mut char) -> crate::Result<()> {
-        if context.shrink() {
-            if *value == '\0' {
-                return Err(Error::mutator_exhausted());
+    fn mutate(&mut self, muts: &mut MutationSet, value: &mut char) -> crate::Result<()> {
+        if muts.shrink() {
+            if *value != '\0' {
+                muts.mutation(|ctx| {
+                    *value = ctx.rng().inner().gen_range('\0'..*value);
+                    Ok(())
+                })?;
             }
-            *value = context.rng().inner().gen_range('\0'..*value);
             Ok(())
         } else {
-            // Choose between one of a few different mutation strategies to skew
+            // Choose between one of a few different mutation strategies to bias
             // the distribution towards interesting characters.
             //
             // See https://en.wikipedia.org/wiki/Plane_(Unicode)#Overview and
             // https://en.wikipedia.org/wiki/Unicode_block#List_of_blocks
+
             let c = |x| char::from_u32(x).unwrap_or_else(|| panic!("invalid char: {x:#x}"));
-            one_of((
-                // Non-control ASCII characters.
-                range(c(0x20)..=c(0x7E)),
-                // Plane 0
-                one_of((
-                    range(c(0x0000)..=c(0x0FFF)),
-                    range(c(0x1000)..=c(0x1FFF)),
-                    range(c(0x2000)..=c(0x2FFF)),
-                    range(c(0x3000)..=c(0x3FFF)),
-                    range(c(0x4000)..=c(0x4FFF)),
-                    range(c(0x5000)..=c(0x5FFF)),
-                    range(c(0x6000)..=c(0x6FFF)),
-                    range(c(0x7000)..=c(0x7FFF)),
-                    range(c(0x8000)..=c(0x8FFF)),
-                    range(c(0x9000)..=c(0x9FFF)),
-                    range(c(0xA000)..=c(0xAFFF)),
-                    range(c(0xB000)..=c(0xBFFF)),
-                    range(c(0xC000)..=c(0xCFFF)),
-                    range(c(0xD000)..=c(0xD7FF)),
-                    range(c(0xE000)..=c(0xEFFF)),
-                    range(c(0xF000)..=c(0xFFFF)),
-                )),
-                // Plane 1
-                one_of((
-                    range(c(0x10000)..=c(0x10FFF)),
-                    range(c(0x11000)..=c(0x11FFF)),
-                    range(c(0x12000)..=c(0x12FFF)),
-                    range(c(0x13000)..=c(0x13FFF)),
-                    range(c(0x14000)..=c(0x14FFF)),
-                    range(c(0x16000)..=c(0x16FFF)),
-                    range(c(0x17000)..=c(0x17FFF)),
-                    range(c(0x18000)..=c(0x18FFF)),
-                    range(c(0x1A000)..=c(0x1AFFF)),
-                    range(c(0x1B000)..=c(0x1BFFF)),
-                    range(c(0x1C000)..=c(0x1CFFF)),
-                    range(c(0x1D000)..=c(0x1DFFF)),
-                    range(c(0x1E000)..=c(0x1EFFF)),
-                    range(c(0x1F000)..=c(0x1FFFF)),
-                )),
-                // Plane 2
-                one_of((
-                    range(c(0x20000)..=c(0x20FFF)),
-                    range(c(0x21000)..=c(0x21FFF)),
-                    range(c(0x22000)..=c(0x22FFF)),
-                    range(c(0x23000)..=c(0x23FFF)),
-                    range(c(0x24000)..=c(0x24FFF)),
-                    range(c(0x25000)..=c(0x25FFF)),
-                    range(c(0x26000)..=c(0x26FFF)),
-                    range(c(0x27000)..=c(0x27FFF)),
-                    range(c(0x28000)..=c(0x28FFF)),
-                    range(c(0x29000)..=c(0x29FFF)),
-                    range(c(0x2A000)..=c(0x2AFFF)),
-                    range(c(0x2B000)..=c(0x2BFFF)),
-                    range(c(0x2C000)..=c(0x2CFFF)),
-                    range(c(0x2D000)..=c(0x2DFFF)),
-                    range(c(0x2E000)..=c(0x2EFFF)),
-                    range(c(0x2F000)..=c(0x2FFFF)),
-                )),
-                // Plane 3
-                one_of((
-                    range(c(0x30000)..=c(0x30FFF)),
-                    range(c(0x31000)..=c(0x31FFF)),
-                    range(c(0x32000)..=c(0x32FFF)),
-                )),
-                // Catch all: any valid character, regardless of its plane,
-                // block, or if it has been assigned or not.
-                from_fn(|context: &mut MutationContext, value: &mut char| {
-                    *value = context.rng().inner().gen();
-                    Ok(())
-                }),
-            ))
-            .mutate(context, value)?;
+
+            // Non-control ASCII characters.
+            range(c(0x20)..=c(0x7E)).mutate(muts, value)?;
+
+            // Plane 0
+            range(c(0x0000)..=c(0x0FFF)).mutate(muts, value)?;
+            range(c(0x1000)..=c(0x1FFF)).mutate(muts, value)?;
+            range(c(0x2000)..=c(0x2FFF)).mutate(muts, value)?;
+            range(c(0x3000)..=c(0x3FFF)).mutate(muts, value)?;
+            range(c(0x4000)..=c(0x4FFF)).mutate(muts, value)?;
+            range(c(0x5000)..=c(0x5FFF)).mutate(muts, value)?;
+            range(c(0x6000)..=c(0x6FFF)).mutate(muts, value)?;
+            range(c(0x7000)..=c(0x7FFF)).mutate(muts, value)?;
+            range(c(0x8000)..=c(0x8FFF)).mutate(muts, value)?;
+            range(c(0x9000)..=c(0x9FFF)).mutate(muts, value)?;
+            range(c(0xA000)..=c(0xAFFF)).mutate(muts, value)?;
+            range(c(0xB000)..=c(0xBFFF)).mutate(muts, value)?;
+            range(c(0xC000)..=c(0xCFFF)).mutate(muts, value)?;
+            range(c(0xD000)..=c(0xD7FF)).mutate(muts, value)?;
+            range(c(0xE000)..=c(0xEFFF)).mutate(muts, value)?;
+            range(c(0xF000)..=c(0xFFFF)).mutate(muts, value)?;
+
+            // Plane 1
+            range(c(0x10000)..=c(0x10FFF)).mutate(muts, value)?;
+            range(c(0x11000)..=c(0x11FFF)).mutate(muts, value)?;
+            range(c(0x12000)..=c(0x12FFF)).mutate(muts, value)?;
+            range(c(0x13000)..=c(0x13FFF)).mutate(muts, value)?;
+            range(c(0x14000)..=c(0x14FFF)).mutate(muts, value)?;
+            range(c(0x16000)..=c(0x16FFF)).mutate(muts, value)?;
+            range(c(0x17000)..=c(0x17FFF)).mutate(muts, value)?;
+            range(c(0x18000)..=c(0x18FFF)).mutate(muts, value)?;
+            range(c(0x1A000)..=c(0x1AFFF)).mutate(muts, value)?;
+            range(c(0x1B000)..=c(0x1BFFF)).mutate(muts, value)?;
+            range(c(0x1C000)..=c(0x1CFFF)).mutate(muts, value)?;
+            range(c(0x1D000)..=c(0x1DFFF)).mutate(muts, value)?;
+            range(c(0x1E000)..=c(0x1EFFF)).mutate(muts, value)?;
+            range(c(0x1F000)..=c(0x1FFFF)).mutate(muts, value)?;
+
+            // Plane 2
+            range(c(0x20000)..=c(0x20FFF)).mutate(muts, value)?;
+            range(c(0x21000)..=c(0x21FFF)).mutate(muts, value)?;
+            range(c(0x22000)..=c(0x22FFF)).mutate(muts, value)?;
+            range(c(0x23000)..=c(0x23FFF)).mutate(muts, value)?;
+            range(c(0x24000)..=c(0x24FFF)).mutate(muts, value)?;
+            range(c(0x25000)..=c(0x25FFF)).mutate(muts, value)?;
+            range(c(0x26000)..=c(0x26FFF)).mutate(muts, value)?;
+            range(c(0x27000)..=c(0x27FFF)).mutate(muts, value)?;
+            range(c(0x28000)..=c(0x28FFF)).mutate(muts, value)?;
+            range(c(0x29000)..=c(0x29FFF)).mutate(muts, value)?;
+            range(c(0x2A000)..=c(0x2AFFF)).mutate(muts, value)?;
+            range(c(0x2B000)..=c(0x2BFFF)).mutate(muts, value)?;
+            range(c(0x2C000)..=c(0x2CFFF)).mutate(muts, value)?;
+            range(c(0x2D000)..=c(0x2DFFF)).mutate(muts, value)?;
+            range(c(0x2E000)..=c(0x2EFFF)).mutate(muts, value)?;
+            range(c(0x2F000)..=c(0x2FFFF)).mutate(muts, value)?;
+
+            // Plane 3
+            range(c(0x30000)..=c(0x30FFF)).mutate(muts, value)?;
+            range(c(0x31000)..=c(0x31FFF)).mutate(muts, value)?;
+            range(c(0x32000)..=c(0x32FFF)).mutate(muts, value)?;
+
+            // Catch all: any valid character, regardless of its plane,
+            // block, or if it has been assigned or not.
+            muts.mutation(|ctx| Ok(*value = ctx.rng().inner().gen()))?;
+
             Ok(())
         }
     }
 }
 
-impl DefaultMutator for char {
-    type DefaultMutator = Char;
+impl DefaultMutate for char {
+    type DefaultMutate = Char;
 }
 
-impl GenerativeMutator<char> for Char {
+impl Generate<char> for Char {
     #[inline]
-    fn generate(&mut self, context: &mut MutationContext) -> crate::Result<char> {
-        Ok(context.rng().inner().gen())
+    fn generate(&mut self, ctx: &mut MutationContext) -> crate::Result<char> {
+        Ok(ctx.rng().inner().gen())
     }
 }
 
-impl RangeMutator<char> for Char {
+impl MutateInRange<char> for Char {
     #[inline]
     fn mutate_in_range(
         &mut self,
-        context: &mut MutationContext,
+        muts: &mut MutationSet,
         value: &mut char,
         range: &ops::RangeInclusive<char>,
     ) -> crate::Result<()> {
@@ -358,12 +348,19 @@ impl RangeMutator<char> for Char {
             return Err(Error::invalid_range());
         }
 
-        if *value == start && context.shrink() {
-            return Err(Error::mutator_exhausted());
+        if *value == start && muts.shrink() {
+            return Ok(());
         }
 
-        *value = context.rng().inner().gen_range(start..=end);
-        Ok(())
+        muts.mutation(|ctx| {
+            let end = if ctx.shrink() {
+                core::cmp::min(*value, end)
+            } else {
+                end
+            };
+            *value = ctx.rng().inner().gen_range(start..=end);
+            Ok(())
+        })
     }
 }
 
@@ -380,14 +377,14 @@ pub struct F32 {
 ///
 /// ```
 /// # fn foo() -> mutatis::Result<()> {
-/// use mutatis::{mutators as m, MutationContext, Mutator};
+/// use mutatis::{mutators as m, Mutate, MutationBuilder};
 ///
 /// let mut mutator = m::f32();
-/// let mut context = MutationContext::default();
+/// let mut mtn = MutationBuilder::new();
 ///
 /// let mut value = 3.14;
 /// for _ in 0..5 {
-///     mutator.mutate(&mut context, &mut value)?;
+///     mtn.mutate_with(&mut mutator, &mut value)?;
 ///     println!("mutated value is {value}");
 /// }
 ///
@@ -406,46 +403,47 @@ pub fn f32() -> F32 {
     F32 { _private: () }
 }
 
-impl Mutator<f32> for F32 {
+impl Mutate<f32> for F32 {
     #[inline]
-    fn mutate(&mut self, context: &mut MutationContext, value: &mut f32) -> crate::Result<()> {
-        let special_finite = one_of((
-            just(0.0),
-            just(1.0),
-            just(-1.0),
-            just(f32::EPSILON),
-            just(f32::MIN_POSITIVE),
-            just(f32::MAX),
-            just(f32::MIN),
-        ));
+    fn mutate(&mut self, muts: &mut MutationSet, value: &mut f32) -> crate::Result<()> {
+        let special_finite = |muts: &mut MutationSet, value: &mut f32| -> crate::Result<()> {
+            muts.mutation(|_| Ok(*value = 0.0))?;
+            muts.mutation(|_| Ok(*value = 1.0))?;
+            muts.mutation(|_| Ok(*value = -1.0))?;
+            muts.mutation(|_| Ok(*value = f32::EPSILON))?;
+            muts.mutation(|_| Ok(*value = f32::MIN_POSITIVE))?;
+            muts.mutation(|_| Ok(*value = f32::MAX))?;
+            muts.mutation(|_| Ok(*value = f32::MIN))?;
+            Ok(())
+        };
 
-        let mut finite = one_of((
-            special_finite,
-            from_fn(|context: &mut MutationContext, value: &mut f32| {
-                *value = context.rng().inner().gen::<f32>() * f32::MAX;
-                Ok(())
-            }),
-            from_fn(|context: &mut MutationContext, value: &mut f32| {
-                *value = context.rng().inner().gen::<f32>() * f32::MIN;
-                Ok(())
-            }),
-        ));
+        let finite = |muts: &mut MutationSet, value: &mut f32| -> crate::Result<()> {
+            special_finite(muts, value)?;
 
-        if context.shrink() {
+            // Positives.
+            muts.mutation(|ctx| Ok(*value = ctx.rng().inner().gen::<f32>() * f32::MAX))?;
+
+            // Negatives.
+            muts.mutation(|ctx| Ok(*value = ctx.rng().inner().gen::<f32>() * f32::MIN))?;
+
+            Ok(())
+        };
+
+        if muts.shrink() {
             if *value == 0.0 {
-                return Err(Error::mutator_exhausted());
+                return Ok(());
             }
             if value.is_nan() || value.is_infinite() {
-                return finite.mutate(context, value);
+                return finite(muts, value);
             }
-            *value *= context.rng().inner().gen::<f32>();
+            muts.mutation(|ctx| Ok(*value *= ctx.rng().inner().gen::<f32>()))?;
             Ok(())
         } else {
-            one_of((
-                finite,
-                one_of((just(f32::INFINITY), just(f32::NEG_INFINITY), just(f32::NAN))),
-            ))
-            .mutate(context, value)
+            finite(muts, value)?;
+            muts.mutation(|_| Ok(*value = f32::INFINITY))?;
+            muts.mutation(|_| Ok(*value = f32::NEG_INFINITY))?;
+            muts.mutation(|_| Ok(*value = f32::NAN))?;
+            Ok(())
         }
     }
 }
@@ -463,14 +461,14 @@ pub struct F64 {
 ///
 /// ```
 /// # fn foo() -> mutatis::Result<()> {
-/// use mutatis::{mutators as m, MutationContext, Mutator};
+/// use mutatis::{mutators as m, Mutate, MutationBuilder};
 ///
 /// let mut mutator = m::f64();
-/// let mut context = MutationContext::default();
+/// let mut mtn = MutationBuilder::new();
 ///
 /// let mut value = 3.14;
 /// for _ in 0..5 {
-///     mutator.mutate(&mut context, &mut value)?;
+///     mtn.mutate_with(&mut mutator, &mut value)?;
 ///     println!("mutated value is {value}");
 /// }
 ///
@@ -489,46 +487,47 @@ pub fn f64() -> F64 {
     F64 { _private: () }
 }
 
-impl Mutator<f64> for F64 {
+impl Mutate<f64> for F64 {
     #[inline]
-    fn mutate(&mut self, context: &mut MutationContext, value: &mut f64) -> crate::Result<()> {
-        let special_finite = one_of((
-            just(0.0),
-            just(1.0),
-            just(-1.0),
-            just(f64::EPSILON),
-            just(f64::MIN_POSITIVE),
-            just(f64::MAX),
-            just(f64::MIN),
-        ));
+    fn mutate(&mut self, muts: &mut MutationSet, value: &mut f64) -> crate::Result<()> {
+        let special_finite = |muts: &mut MutationSet, value: &mut f64| -> crate::Result<()> {
+            muts.mutation(|_| Ok(*value = 0.0))?;
+            muts.mutation(|_| Ok(*value = 1.0))?;
+            muts.mutation(|_| Ok(*value = -1.0))?;
+            muts.mutation(|_| Ok(*value = f64::EPSILON))?;
+            muts.mutation(|_| Ok(*value = f64::MIN_POSITIVE))?;
+            muts.mutation(|_| Ok(*value = f64::MAX))?;
+            muts.mutation(|_| Ok(*value = f64::MIN))?;
+            Ok(())
+        };
 
-        let mut finite = one_of((
-            special_finite,
-            from_fn(|context: &mut MutationContext, value: &mut f64| {
-                *value = context.rng().inner().gen::<f64>() * f64::MAX;
-                Ok(())
-            }),
-            from_fn(|context: &mut MutationContext, value: &mut f64| {
-                *value = context.rng().inner().gen::<f64>() * f64::MIN;
-                Ok(())
-            }),
-        ));
+        let finite = |muts: &mut MutationSet, value: &mut f64| -> crate::Result<()> {
+            special_finite(muts, value)?;
 
-        if context.shrink() {
+            // Positives.
+            muts.mutation(|ctx| Ok(*value = ctx.rng().inner().gen::<f64>() * f64::MAX))?;
+
+            // Negatives.
+            muts.mutation(|ctx| Ok(*value = ctx.rng().inner().gen::<f64>() * f64::MIN))?;
+
+            Ok(())
+        };
+
+        if muts.shrink() {
             if *value == 0.0 {
-                return Err(Error::mutator_exhausted());
+                return Ok(());
             }
             if value.is_nan() || value.is_infinite() {
-                return finite.mutate(context, value);
+                return finite(muts, value);
             }
-            *value *= context.rng().inner().gen::<f64>();
+            muts.mutation(|ctx| Ok(*value *= ctx.rng().inner().gen::<f64>()))?;
             Ok(())
         } else {
-            one_of((
-                finite,
-                one_of((just(f64::INFINITY), just(f64::NEG_INFINITY), just(f64::NAN))),
-            ))
-            .mutate(context, value)
+            finite(muts, value)?;
+            muts.mutation(|_| Ok(*value = f64::INFINITY))?;
+            muts.mutation(|_| Ok(*value = f64::NEG_INFINITY))?;
+            muts.mutation(|_| Ok(*value = f64::NAN))?;
+            Ok(())
         }
     }
 }
@@ -557,13 +556,13 @@ macro_rules! tuples {
             ///
             /// ```
             /// # fn _foo() -> mutatis::Result<()> {
-            /// use mutatis::{mutators as m, MutationContext, Mutator};
+            /// use mutatis::{mutators as m, Mutate, MutationBuilder};
             ///
             /// let mut mutator = m::tuple2(m::u8(), m::i16());
-            /// let mut context = MutationContext::default();
+            /// let mut mtn = MutationBuilder::new();
             ///
             /// let mut value = (42, -1234);
-            /// mutator.mutate(&mut context, &mut value)?;
+            /// mtn.mutate_with(&mut mutator, &mut value)?;
             ///
             /// println!("mutated value is {value:?}");
             /// # Ok(())
@@ -579,34 +578,33 @@ macro_rules! tuples {
             }
 
             #[allow(non_snake_case)]
-            impl< $( $m , $t, )* > Mutator<( $( $t , )* )> for $ty_name<$( $m , )*>
+            impl< $( $m , $t, )* > Mutate<( $( $t , )* )> for $ty_name<$( $m , )*>
             where
                 $(
-                    $m: Mutator<$t>,
+                    $m: Mutate<$t>,
                 )*
             {
                 #[inline]
                 fn mutate(
                     &mut self,
-                    context: &mut MutationContext,
+                    _muts: &mut MutationSet,
                     ( $( $t , )* ): &mut ( $( $t , )* ),
                 ) -> crate::Result<()> {
                     $(
-                        self.$m.mutate(context, $t)?;
+                        self.$m.mutate(_muts, $t)?;
                     )*
-                        let _ = context;
                     Ok(())
                 }
             }
 
             #[allow(non_snake_case)]
-            impl< $( $t , )* > DefaultMutator for ( $( $t , )* )
+            impl< $( $t , )* > DefaultMutate for ( $( $t , )* )
             where
                 $(
-                    $t: DefaultMutator,
+                    $t: DefaultMutate,
                 )*
             {
-                type DefaultMutator = $ty_name<$( $t::DefaultMutator , )*>;
+                type DefaultMutate = $ty_name<$( $t::DefaultMutate , )*>;
             }
         )*
     };
@@ -645,26 +643,26 @@ pub struct Unit {
 /// # Example
 ///
 /// ```
-/// use mutatis::{mutators as m, Error, MutationContext, Mutator};
+/// use mutatis::{mutators as m, Error, Mutate, MutationBuilder};
 ///
 /// let mut mutator = m::unit();
-/// let mut context = MutationContext::default();
+/// let mut mtn = MutationBuilder::new();
 ///
 /// let mut value = ();
-/// let err = mutator.mutate(&mut context, &mut value).unwrap_err();
+/// let err = mtn.mutate_with(&mut mutator, &mut value).unwrap_err();
 ///
 /// // Because there is only one possible value for the unit type, the mutator
 /// // is always exhausted.
-/// assert!(err.is_mutator_exhausted());
+/// assert!(err.is_exhausted());
 /// ```
 pub fn unit() -> Unit {
     Unit { _private: () }
 }
 
-impl Mutator<()> for Unit {
+impl Mutate<()> for Unit {
     #[inline]
-    fn mutate(&mut self, _context: &mut MutationContext, _value: &mut ()) -> crate::Result<()> {
-        Err(Error::mutator_exhausted())
+    fn mutate(&mut self, _muts: &mut MutationSet, _value: &mut ()) -> crate::Result<()> {
+        Ok(())
     }
 }
 
@@ -682,13 +680,13 @@ pub struct Array<const N: usize, M> {
 /// # Example
 ///
 /// ```
-/// use mutatis::{mutators as m, MutationContext, Mutator};
+/// use mutatis::{mutators as m, Mutate, MutationBuilder};
 ///
 /// let mut mutator = m::array(m::u8());
-/// let mut context = MutationContext::default();
+/// let mut mtn = MutationBuilder::new();
 ///
 /// let mut value = [1, 2, 3, 4];
-/// mutator.mutate(&mut context, &mut value).unwrap();
+/// mtn.mutate_with(&mut mutator, &mut value).unwrap();
 ///
 /// println!("mutated array is {value:?}");
 /// ```
@@ -696,24 +694,24 @@ pub fn array<const N: usize, M>(mutator: M) -> Array<N, M> {
     Array { mutator }
 }
 
-impl<const N: usize, M, T> Mutator<[T; N]> for Array<N, M>
+impl<const N: usize, M, T> Mutate<[T; N]> for Array<N, M>
 where
-    M: Mutator<T>,
+    M: Mutate<T>,
 {
     #[inline]
-    fn mutate(&mut self, context: &mut MutationContext, value: &mut [T; N]) -> crate::Result<()> {
+    fn mutate(&mut self, muts: &mut MutationSet, value: &mut [T; N]) -> crate::Result<()> {
         for element in value.iter_mut() {
-            self.mutator.mutate(context, element)?;
+            self.mutator.mutate(muts, element)?;
         }
         Ok(())
     }
 }
 
-impl<const N: usize, T> DefaultMutator for [T; N]
+impl<const N: usize, T> DefaultMutate for [T; N]
 where
-    T: DefaultMutator,
+    T: DefaultMutate,
 {
-    type DefaultMutator = Array<N, T::DefaultMutator>;
+    type DefaultMutate = Array<N, T::DefaultMutate>;
 }
 
 /// A mutator for `Option<T>`.
@@ -730,13 +728,13 @@ pub struct Option<M> {
 /// # Example
 ///
 /// ```
-/// use mutatis::{mutators as m, MutationContext, Mutator};
+/// use mutatis::{mutators as m, Mutate, MutationBuilder};
 ///
 /// let mut mutator = m::option(m::u32());
-/// let mut context = MutationContext::default();
+/// let mut mtn = MutationBuilder::new();
 ///
 /// let mut value = Some(36);
-/// mutator.mutate(&mut context, &mut value).unwrap();
+/// mtn.mutate_with(&mut mutator, &mut value).unwrap();
 ///
 /// println!("mutated option is {value:?}");
 /// ```
@@ -744,36 +742,36 @@ pub fn option<M>(mutator: M) -> Option<M> {
     Option { mutator }
 }
 
-impl<M, T> Mutator<core::option::Option<T>> for Option<M>
+impl<M, T> Mutate<core::option::Option<T>> for Option<M>
 where
-    M: GenerativeMutator<T>,
+    M: Generate<T>,
 {
     #[inline]
     fn mutate(
         &mut self,
-        context: &mut MutationContext,
+        muts: &mut MutationSet,
         value: &mut core::option::Option<T>,
     ) -> crate::Result<()> {
-        match (context.shrink(), value.as_mut()) {
-            (true, Some(value)) if context.rng().gen_bool() => self.mutator.mutate(context, value),
-            (true, Some(_)) => {
-                *value = None;
-                Ok(())
-            }
-            (true, None) => Err(Error::mutator_exhausted()),
+        if muts.shrink() && value.is_none() {
+            return Ok(());
+        }
 
-            (false, Some(value)) if context.rng().gen_bool() => self.mutator.mutate(context, value),
-            (false, Some(_)) => {
-                *value = None;
-                Ok(())
-            }
-
-            (false, None) => {
-                *value = Some(self.mutator.generate(context)?);
-                Ok(())
+        match value.as_mut() {
+            None => muts.mutation(|ctx| Ok(*value = Some(self.mutator.generate(ctx)?))),
+            Some(v) => {
+                self.mutator.mutate(muts, v)?;
+                muts.mutation(|_| Ok(*value = None))
             }
         }
     }
+}
+
+impl<T> DefaultMutate for core::option::Option<T>
+where
+    T: DefaultMutate,
+    T::DefaultMutate: Generate<T>,
+{
+    type DefaultMutate = Option<T::DefaultMutate>;
 }
 
 /// A mutator for `Result<T, E>`.
@@ -791,13 +789,13 @@ pub struct Result<M, N> {
 /// # Example
 ///
 /// ```
-/// use mutatis::{mutators as m, MutationContext, Mutator};
+/// use mutatis::{mutators as m, Mutate, MutationBuilder};
 ///
 /// let mut mutator = m::result(m::u32(), m::i8());
-/// let mut context = MutationContext::default();
+/// let mut mtn = MutationBuilder::new();
 ///
 /// let mut value = Ok(1312);
-/// mutator.mutate(&mut context, &mut value).unwrap();
+/// mtn.mutate_with(&mut mutator, &mut value).unwrap();
 ///
 /// println!("mutated result is {value:?}");
 /// ```
@@ -808,48 +806,41 @@ pub fn result<M, N>(ok_mutator: M, err_mutator: N) -> Result<M, N> {
     }
 }
 
-impl<M, N, T, E> Mutator<core::result::Result<T, E>> for Result<M, N>
+impl<M, N, T, E> Mutate<core::result::Result<T, E>> for Result<M, N>
 where
-    M: GenerativeMutator<T>,
-    N: GenerativeMutator<E>,
+    M: Generate<T>,
+    N: Generate<E>,
 {
     #[inline]
     fn mutate(
         &mut self,
-        context: &mut MutationContext,
+        muts: &mut MutationSet,
         value: &mut core::result::Result<T, E>,
     ) -> crate::Result<()> {
-        match (context.shrink(), &mut *value) {
-            (true, Ok(x)) => self.ok_mutator.mutate(context, x),
-
-            (true, Err(e)) => {
-                if context.rng().gen_bool() {
-                    self.err_mutator.mutate(context, e)
-                } else {
-                    *value = Ok(self.ok_mutator.generate(context)?);
-                    Ok(())
+        match value {
+            Ok(x) => {
+                self.ok_mutator.mutate(muts, x)?;
+                if !muts.shrink() {
+                    muts.mutation(|ctx| Ok(*value = Err(self.err_mutator.generate(ctx)?)))?;
                 }
             }
-
-            (false, Ok(x)) => {
-                if context.rng().gen_bool() {
-                    self.ok_mutator.mutate(context, x)
-                } else {
-                    *value = Err(self.err_mutator.generate(context)?);
-                    Ok(())
-                }
-            }
-
-            (false, Err(e)) => {
-                if context.rng().gen_bool() {
-                    self.err_mutator.mutate(context, e)
-                } else {
-                    *value = Ok(self.ok_mutator.generate(context)?);
-                    Ok(())
-                }
+            Err(e) => {
+                self.err_mutator.mutate(muts, e)?;
+                muts.mutation(|ctx| Ok(*value = Ok(self.ok_mutator.generate(ctx)?)))?;
             }
         }
+        Ok(())
     }
+}
+
+impl<T, E> DefaultMutate for core::result::Result<T, E>
+where
+    T: DefaultMutate,
+    T::DefaultMutate: Generate<T>,
+    E: DefaultMutate,
+    E::DefaultMutate: Generate<E>,
+{
+    type DefaultMutate = Result<T::DefaultMutate, E::DefaultMutate>;
 }
 
 /// A mutator for `T` values within a given range.
@@ -867,20 +858,20 @@ pub struct Range<M, T> {
 /// # Example
 ///
 /// ```
-/// use mutatis::{mutators as m, MutationContext, Mutator};
+/// use mutatis::{mutators as m, Mutate, MutationBuilder};
 ///
 /// let mut mutator = m::range(111..=666);
-/// let mut context = MutationContext::default();
+/// let mut mtn = MutationBuilder::new();
 ///
 /// let mut value = 123;
-/// mutator.mutate(&mut context, &mut value).unwrap();
+/// mtn.mutate_with(&mut mutator, &mut value).unwrap();
 ///
 /// assert!(value >= 111);
 /// assert!(value <= 666);
 /// ```
-pub fn range<T>(range: ops::RangeInclusive<T>) -> Range<T::DefaultMutator, T>
+pub fn range<T>(range: ops::RangeInclusive<T>) -> Range<T::DefaultMutate, T>
 where
-    T: DefaultMutator,
+    T: DefaultMutate,
 {
     let mutator = default::<T>();
     Range { mutator, range }
@@ -892,25 +883,24 @@ pub fn range_with<M, T>(range: ops::RangeInclusive<T>, mutator: M) -> Range<M, T
     Range { mutator, range }
 }
 
-impl<M, T> Mutator<T> for Range<M, T>
+impl<M, T> Mutate<T> for Range<M, T>
 where
-    M: RangeMutator<T>,
+    M: MutateInRange<T>,
 {
     #[inline]
-    fn mutate(&mut self, context: &mut MutationContext, value: &mut T) -> crate::Result<()> {
-        self.mutator.mutate_in_range(context, value, &self.range)
+    fn mutate(&mut self, muts: &mut MutationSet, value: &mut T) -> crate::Result<()> {
+        self.mutator.mutate_in_range(muts, value, &self.range)
     }
 }
 
-impl<M, T> GenerativeMutator<T> for Range<M, T>
+impl<M, T> Generate<T> for Range<M, T>
 where
-    M: GenerativeMutator<T> + RangeMutator<T>,
+    M: Generate<T> + MutateInRange<T>,
 {
     #[inline]
     fn generate(&mut self, context: &mut MutationContext) -> crate::Result<T> {
         let mut value = self.mutator.generate(context)?;
-        self.mutator
-            .mutate_in_range(context, &mut value, &self.range)?;
+        context.mutate_in_range_with(&mut self.mutator, &mut value, &self.range)?;
         Ok(value)
     }
 }

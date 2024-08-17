@@ -11,7 +11,7 @@ use field_attributes::FieldBehavior;
 
 static MUTATIS_ATTRIBUTE_NAME: &str = "mutatis";
 
-#[proc_macro_derive(Mutator, attributes(mutatis))]
+#[proc_macro_derive(Mutate, attributes(mutatis))]
 pub fn derive_mutator(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = syn::parse_macro_input!(tokens as DeriveInput);
     expand_derive_mutator(input)
@@ -162,7 +162,7 @@ impl MutatorType {
             .chain(self.mutator_fields.iter().filter_map(move |f| {
                 f.generic.as_ref().map(|g| {
                     let for_ty = &f.for_ty;
-                    quote! { #g = <#for_ty as mutatis::DefaultMutator>::DefaultMutator }
+                    quote! { #g = <#for_ty as mutatis::DefaultMutate>::DefaultMutate }
                 })
             }))
     }
@@ -204,15 +204,15 @@ impl MutatorType {
         let mut bounds = self.ty_generics_bounds.clone();
 
         match kind {
-            WhereClauseKind::NoMutatorBounds => {}
-            WhereClauseKind::MutatorBounds => {
+            WhereClauseKind::NoMutateBounds => {}
+            WhereClauseKind::MutateBounds => {
                 for f in &self.mutator_fields {
                     let for_ty = &f.for_ty;
                     if let Some(g) = f.generic.as_ref() {
-                        bounds.push(quote! { #g: mutatis::Mutator<#for_ty> });
+                        bounds.push(quote! { #g: mutatis::Mutate<#for_ty> });
                     } else {
-                        debug_assert_eq!(f.behavior, FieldBehavior::DefaultMutator);
-                        bounds.push(quote! { #for_ty: mutatis::DefaultMutator });
+                        debug_assert_eq!(f.behavior, FieldBehavior::DefaultMutate);
+                        bounds.push(quote! { #for_ty: mutatis::DefaultMutate });
                     }
                 }
             }
@@ -222,15 +222,15 @@ impl MutatorType {
                         bounds.push(quote! { #g: Default });
                     } else {
                         let for_ty = &f.for_ty;
-                        debug_assert_eq!(f.behavior, FieldBehavior::DefaultMutator);
-                        bounds.push(quote! { #for_ty: mutatis::DefaultMutator });
+                        debug_assert_eq!(f.behavior, FieldBehavior::DefaultMutate);
+                        bounds.push(quote! { #for_ty: mutatis::DefaultMutate });
                     }
                 }
             }
-            WhereClauseKind::DefaultMutatorBounds => {
+            WhereClauseKind::DefaultMutateBounds => {
                 for f in &self.mutator_fields {
                     let for_ty = &f.for_ty;
-                    bounds.push(quote! { #for_ty: mutatis::DefaultMutator });
+                    bounds.push(quote! { #for_ty: mutatis::DefaultMutate });
                 }
             }
         }
@@ -282,10 +282,10 @@ impl MutatorType {
 
 #[derive(Clone, Copy)]
 enum WhereClauseKind {
-    NoMutatorBounds,
-    MutatorBounds,
+    NoMutateBounds,
+    MutateBounds,
     DefaultBounds,
-    DefaultMutatorBounds,
+    DefaultMutateBounds,
 }
 
 #[derive(Clone, Copy)]
@@ -406,7 +406,7 @@ fn get_mutator_fields(input: &DeriveInput) -> Result<Vec<MutatorField>> {
             .collect()),
         Data::Union(_) => Err(Error::new_spanned(
             input,
-            "cannot `derive(Mutator)` on a union",
+            "cannot `derive(Mutate)` on a union",
         )),
     }
 }
@@ -432,7 +432,7 @@ fn gen_mutator_type_def(
         std::slice::from_ref(temp.as_ref().unwrap())
     });
 
-    let where_clause = mutator_ty.where_clause(WhereClauseKind::NoMutatorBounds);
+    let where_clause = mutator_ty.where_clause(WhereClauseKind::NoMutateBounds);
 
     let fields = mutator_ty
         .mutator_fields
@@ -443,8 +443,8 @@ fn gen_mutator_type_def(
                 quote! { #ident: #g , }
             } else {
                 let for_ty = &f.for_ty;
-                debug_assert_eq!(f.behavior, FieldBehavior::DefaultMutator);
-                quote! { #ident: <#for_ty as mutatis::DefaultMutator>::DefaultMutator, }
+                debug_assert_eq!(f.behavior, FieldBehavior::DefaultMutate);
+                quote! { #ident: <#for_ty as mutatis::DefaultMutate>::DefaultMutate, }
             }
         })
         .collect::<Vec<_>>();
@@ -515,7 +515,7 @@ fn gen_mutator_ctor(mutator_ty: &MutatorType) -> Result<TokenStream> {
                 quote! { #ident , }
             } else {
                 let for_ty = &f.for_ty;
-                debug_assert_eq!(f.behavior, FieldBehavior::DefaultMutator);
+                debug_assert_eq!(f.behavior, FieldBehavior::DefaultMutate);
                 quote! { #ident: mutatis::mutators::default::<#for_ty>() , }
             }
         })
@@ -523,7 +523,7 @@ fn gen_mutator_ctor(mutator_ty: &MutatorType) -> Result<TokenStream> {
 
     let name = &mutator_ty.mutator_name_with_generics(MutatorNameGenericsKind::Generics);
     let doc = format!("Construct a new `{name}` instance.");
-    let where_clause = mutator_ty.where_clause(WhereClauseKind::NoMutatorBounds);
+    let where_clause = mutator_ty.where_clause(WhereClauseKind::NoMutateBounds);
     let phantoms = mutator_ty.phantom_fields_literals();
 
     Ok(quote! {
@@ -548,12 +548,12 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
     let impl_generics = mutator_ty.mutator_impl_generics();
 
     let ty_name = mutator_ty.ty_name_with_generics();
-    let where_clause = mutator_ty.where_clause(WhereClauseKind::MutatorBounds);
+    let where_clause = mutator_ty.where_clause(WhereClauseKind::MutateBounds);
 
     let mut fields_iter = mutator_ty.mutator_fields.iter();
     let mut make_mutation = |value| {
         let ident = &fields_iter.next().unwrap().ident;
-        quote! { self.#ident.mutate(context, #value)?; }
+        quote! { self.#ident.mutate(mutations, #value)?; }
     };
 
     let mutation_body = match &input.data {
@@ -663,7 +663,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
         Data::Union(_) => {
             return Err(Error::new_spanned(
                 input,
-                "cannot `derive(Mutator)` on a union",
+                "cannot `derive(Mutate)` on a union",
             ))
         }
     };
@@ -671,13 +671,13 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
     let mutate_method = quote! {
         fn mutate(
             &mut self,
-            context: &mut mutatis::MutationContext,
+            mutations: &mut mutatis::MutationSet,
             value: &mut #ty_name,
         ) -> mutatis::Result<()> {
             #mutation_body
 
             // Silence unused-variable warnings if every field was marked `ignore`.
-            let _ = (context, value);
+            let _ = (mutations, value);
 
             Ok(())
         }
@@ -687,7 +687,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
 
     Ok(quote! {
         #[automatically_derived]
-        impl #impl_generics mutatis::Mutator<#ty_name> for #mutator_name
+        impl #impl_generics mutatis::Mutate<#ty_name> for #mutator_name
             #where_clause
         {
             #mutate_method
@@ -712,16 +712,16 @@ fn gen_default_mutator_impl(
     };
 
     let ty_name = mutator_ty.ty_name_with_generics();
-    let where_clause = mutator_ty.where_clause(WhereClauseKind::DefaultMutatorBounds);
+    let where_clause = mutator_ty.where_clause(WhereClauseKind::DefaultMutateBounds);
     let mutator_name =
         &mutator_ty.mutator_name_with_generics(MutatorNameGenericsKind::JustTyGenerics);
 
     Ok(quote! {
         #[automatically_derived]
-        impl #ty_generics mutatis::DefaultMutator for #ty_name
+        impl #ty_generics mutatis::DefaultMutate for #ty_name
             #where_clause
         {
-            type DefaultMutator = #mutator_name;
+            type DefaultMutate = #mutator_name;
         }
     })
 }

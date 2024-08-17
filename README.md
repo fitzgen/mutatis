@@ -51,66 +51,123 @@ simplify writing these custom mutation hooks.
 
 There are two primary components to this library:
 
-1. **[The `mutatis::Mutator`
-   trait.](https://docs.rs/mutatis/latest/mutatis/trait.Mutator.html)** A trait
+1. **[The `mutatis::Mutate`
+   trait.](https://docs.rs/mutatis/latest/mutatis/trait.Mutate.html)** A trait
    that is implemented by types which can mutate other types. The
-   `mutatis::Mutator::mutate` trait method takes a value and mutates it. You can
-   think of a `mutatis::Mutator` implementation like a streaming iterator that
-   takes as input and modifies items, rather than generating them from scratch
-   and returning them.
+   `mutatis::Mutate::mutate` trait method takes a value and chooses one of many
+   mutations to apply. You can think of a `mutatis::Mutate` implementation like
+   a random streaming iterator that takes an item as input and modifies it into
+   the next value, rather than generating and returning them.
 
 2. **[The `mutatis::mutators`
    module.](https://docs.rs/mutatis/latest/mutatis/mutators/index.html)** This
-   module, idiomatically imported via `use mutatis::mutators as m`, provides a
+   module, idiomatically imported via `use mutatis::mutators as m`, provides
    types and combinators for building custom mutators.
+
+### Using Default Mutators
+
+Here's a simple example of using `mutatis` and its default mutators to randomly
+mutate a value:
+
+```rust
+# fn foo() -> mutatis::Result<()> {
+let mut point = (42, 36);
+
+let mut mtn = mutatis::MutationBuilder::new();
+for _ in 0..3 {
+    mtn.mutate(&mut point)?;
+    println!("mutated point is {point:?}");
+}
+
+// Example output:
+//
+//     mutated point is (-565504428, 36)
+//     mutated point is (-565504428, 49968845)
+//     mutated point is (-1854163941, 49968845)
+# Ok(())
+# }
+# foo().unwrap()
+```
+
+### Using Mutator Combinators
 
 Here's an example of using `mutatis` to define a custom mutator for a simple
 data structure:
 
 ```rust
 # fn foo() -> mutatis::Result<()> {
-use mutatis::{mutators as m, MutationContext, Mutator};
+use mutatis::{mutators as m, Mutate, MutationBuilder};
 
 /// A silly monster type.
 #[derive(Debug)]
 pub struct Monster {
-    hp: u16,
-    is_ghost: bool,
     pos: [i32; 2],
+    hp: u16,
+
+    // Invariant: ghost's are already dead, so when `is_ghost = true` it must
+    // always be the case that `hp = 0`.
+    is_ghost: bool,
 }
 
-/// A mutator that chooses one of a monster's fields to mutate.
-let mut mutator = m::one_of((
-    m::u16().proj(|x: &mut Monster| &mut x.hp),
-    m::bool().proj(|x: &mut Monster| &mut x.is_ghost),
-    m::array(m::i32()).proj(|x: &mut Monster| &mut x.pos),
-));
+/// A mutator that mutates one of a monster's fields, while maintaining our
+/// invariant that ghosts always have zero HP.
+let mut mutator =
+    // Mutate the `pos` field...
+    m::array(m::i32()).proj(|x: &mut Monster| &mut x.pos)
+        // ...or mutate the `hp` field...
+        .or(
+            m::u16()
+                .proj(|x: &mut Monster| &mut x.hp)
+                .map(|_ctx, monster| {
+                    // If we mutated the `hp` such that it is non-zero, then the
+                    // monster cannot be a ghost.
+                    if monster.hp > 0 {
+                        monster.is_ghost = false;
+                    }
+                    Ok(())
+                }),
+        )
+        // ...or mutate the `is_ghost` field.
+        .or(
+            m::bool()
+                .proj(|x: &mut Monster| &mut x.is_ghost)
+                .map(|_ctx, monster| {
+                    // If we turned this monster into a ghost, then its `hp`
+                    // must be zero.
+                    if monster.is_ghost {
+                        monster.hp = 0;
+                    }
+                    Ok(())
+                }),
+        );
 
 // Define a monster...
 let mut monster = Monster {
     hp: 36,
-    is_ghost: true,
-    pos: [42, -8],
+    is_ghost: false,
+    pos: [-8, 9000],
 };
 
 // ...and mutate it a bunch of times!
-let mut context = MutationContext::default();
+let mut mtn = MutationBuilder::new();
 for _ in 0..5 {
-    mutator.mutate(&mut context, &mut monster)?;
+    mtn.mutate_with(&mut mutator, &mut monster)?;
     println!("mutated monster is {monster:?}");
 }
 
 // Example output:
 //
-//     mutated monster is Monster { hp: 25654, is_ghost: true, pos: [42, -8] }
-//     mutated monster is Monster { hp: 25654, is_ghost: false, pos: [42, -8] }
-//     mutated monster is Monster { hp: 61108, is_ghost: false, pos: [42, -8] }
-//     mutated monster is Monster { hp: 61108, is_ghost: false, pos: [-1166784619, -8] }
+//     mutated monster is Monster { pos: [-8, -1647191276], hp: 36, is_ghost: false }
+//     mutated monster is Monster { pos: [-8, -1062708247], hp: 36, is_ghost: false }
+//     mutated monster is Monster { pos: [-8, -1062708247], hp: 61401, is_ghost: false }
+//     mutated monster is Monster { pos: [-8, -1062708247], hp: 0, is_ghost: true }
+//     mutated monster is Monster { pos: [-8, 1487274938], hp: 0, is_ghost: true }
 # Ok(())
 # }
+# foo().unwrap()
 ```
 
-### Automatically Deriving Mutators with `#[derive(Mutator)]`
+### Automatically Deriving Mutators with `#[derive(Mutate)]`
 
 If you enable this crate's `derive` feature, then you can automatically derive
 mutators for your type definitions.
@@ -122,88 +179,94 @@ First, enable the `derive` feature in `Cargo.toml`:
 mutatis = { ..., features = ["derive"] }
 ```
 
-Then simply slap `#[derive(Mutator)]` onto your type definitions:
+Then simply slap `#[derive(Mutate)]` onto your type definitions:
 
 ```rust
 # fn foo() -> mutatis::Result<()> {
 #![cfg(feature = "derive")]
-use mutatis::{mutators as m, MutationContext, Mutator};
+use mutatis::{Mutate, MutationBuilder};
 
-/// A silly monster type that derives `Mutator`.
-#[derive(Debug, Mutator)]
-pub struct Monster {
-    hp: u16,
-    is_ghost: bool,
-    pos: [i32; 2],
+// The derive macro will automatically generate a `Vec2Mutator` type that
+// implements `Mutate<Vec2>` and register it as the default mutator for
+// `Vec2`s.
+#[derive(Debug, Mutate)]
+pub struct Vec2 {
+    pub x: i32,
+    pub y: i32,
 }
 
-// The derive macro will automatically generate a `MonsterMutator` type that
-// implements `Mutator<Monster>` and register it as the default mutator for
-// `Monster`s.
-let mut mutator = m::default::<Monster>();
-
-// Define a monster...
-let mut monster = Monster {
-    hp: 36,
-    is_ghost: true,
-    pos: [42, -8],
+// Define a vec2...
+let mut v = Vec2 {
+    x: 99,
+    y: 1,
 };
 
 // ...and mutate it a bunch of times!
-let mut context = MutationContext::default();
+let mut mtn = MutationBuilder::new();
 for _ in 0..5 {
-    mutator.mutate(&mut context, &mut monster)?;
-    println!("mutated monster is {monster:?}");
+    mtn.mutate(&mut v)?;
+    println!("mutated v is {v:?}");
 }
 
 // Example output:
 //
-//     mutated monster is Monster { hp: 36, is_ghost: false, pos: [42, -8] }
-//     mutated monster is Monster { hp: 36, is_ghost: false, pos: [42, -982287921] }
-//     mutated monster is Monster { hp: 36, is_ghost: false, pos: [42, 1443194178] }
-//     mutated monster is Monster { hp: 36, is_ghost: true, pos: [42, 1443194178] }
-//     mutated monster is Monster { hp: 37582, is_ghost: true, pos: [42, 1443194178] }
+//     mutated v is Vec2 { x: 99, y: 49968845 }
+//     mutated v is Vec2 { x: 99, y: 1848354087 }
+//     mutated v is Vec2 { x: -1320835063, y: 1848354087 }
+//     mutated v is Vec2 { x: -1320835063, y: 1443194178 }
+//     mutated v is Vec2 { x: -437057104, y: 1443194178 }
 # Ok(())
 # }
+# #[cfg(feature = "derive")] foo().unwrap()
 ```
 
-The generated mutator also has a constructor that takes sub-mutators for each
-field of the input type, which allows you to customize how each field is
+Derived mutators also have a `new` constructor that takes sub-mutators for each
+field of their input type, which allows you to customize how each field is
 mutated:
 
 ```rust
 # fn foo() -> mutatis::Result<()> {
 #![cfg(feature = "derive")]
-use mutatis::{mutators as m, MutationContext, Mutator};
+use mutatis::{mutators as m, Mutate, MutationBuilder};
 
-#[derive(Debug, Mutator)]
-pub struct MyType(u32, u32);
+#[derive(Debug, Mutate)]
+pub struct MyType(u32, bool, u32);
 
-// A `MyType` mutator that will only generate inner values within the given
-// ranges.
-let mut mutator = MyTypeMutator::new(m::range(10..=100), m::range(0..=42));
+// A `MyType` mutator that will only mutate values such that the following
+// invariants hold true:
+//
+// * `10 <= value.0 <= 100`
+// * `value.1 = true`
+// * `0 <= value.2 <= 42`
+let mut mutator = MyTypeMutator::new(
+    m::range(10..=100),
+    m::just(true),
+    m::range(0..=42),
+);
 
-let mut value = MyType(1, 2);
-let mut context = MutationContext::default();
+let mut value = MyType(1, false, 2);
+
+let mut mtn = MutationBuilder::new();
 for _ in 0..5 {
-    mutator.mutate(&mut context, &mut value)?;
+    mtn.mutate_with(&mut mutator, &mut value)?;
     println!("mutated value is {value:?}");
 }
 
 // Example output:
 //
-//     mutated value is MyType(11, 2)
-//     mutated value is MyType(38, 2)
-//     mutated value is MyType(38, 41)
-//     mutated value is MyType(35, 41)
-//     mutated value is MyType(35, 24)
+//     mutated value is MyType(1, true, 2)
+//     mutated value is MyType(1, true, 0)
+//     mutated value is MyType(1, true, 18)
+//     mutated value is MyType(73, true, 18)
+//     mutated value is MyType(73, true, 14)
 # Ok(())
 # }
+# #[cfg(feature = "derive")] foo().unwrap();
 ```
 
 #### Container Attributes
 
-The `#[derive(Mutator)]` macro supports the following attributes on `struct`s
+The `#[derive(Mutate)]` macro supports the following attributes on `struct`s
 and `enum`s:
 
 * `#[mutatis(mutator_name = MyCoolName)]`: Generate a mutator type named
@@ -213,17 +276,17 @@ and `enum`s:
   for the generated mutator type. This may be repeated multiple times. The
   resulting doc comment is a concatenation of all occurrences.
 
-* `#[mutatis(default_mutator = false)]`: Do not implement the `DefaultMutator`
+* `#[mutatis(default_mutate = false)]`: Do not implement the `DefaultMutate`
   trait for the generated mutator type.
 
 #### Field Attributes
 
-The `#[derive(Mutator)]` macro suports the following attributes on fields within
+The `#[derive(Mutate)]` macro suports the following attributes on fields within
 `struct`s and `enum` variants:
 
 * `#[mutatis(ignore)]`: Do not mutate this field.
 
-* `#[mutatis(default_mutator)]`: Always use this field's type's `DefaultMutator`
+* `#[mutatis(default_mutate)]`: Always use this field's type's `DefaultMutate`
   implementation to mutate this field. Do not generate a generic type parameter
   or argument to the generated mutator's constructor for mutating this field.
 
@@ -275,11 +338,11 @@ color, and then updates the fuzzer's test case based on the mutated RGB color.
 #[cfg(feature = "derive")]
 # mod example {
 use libfuzzer_sys::{fuzzer_mutate, fuzz_mutator, fuzz_target};
-use mutatis::{mutators as m, MutationContext, Mutator};
+use mutatis::{mutators as m, Mutate, MutationBuilder};
 
 /// A red-green-blue color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Mutator)]
+#[derive(Mutate)]
 pub struct Rgb([u8; 3]);
 
 impl Rgb {
@@ -337,43 +400,46 @@ fuzz_mutator!(|data: &mut [u8], size: usize, max_size: usize, seed: u32| {
 
     let mut rgb = Rgb::from_bytes(bytes);
 
-    // Create a mutator for the RGB color.
-    let mut mutator = m::default::<Rgb>();
-
     // Configure the mutation with the seed that libfuzzer gave us.
-    let mut context = MutationContext::builder()
-        .seed(seed.into())
-        .build();
+    let mut mtn = MutationBuilder::new().seed(seed.into());
 
-    // Mutate the RGB color!
-    mutator.mutate(&mut context, &mut rgb);
+    // Mutate `rgb` using its default, derived mutator!
+    match mtn.mutate(&mut rgb) {
+        Ok(()) => {
+            // Update the fuzzer's raw data based on the mutated RGB color.
+            let new_bytes = rgb.to_bytes();
+            let new_size = std::cmp::min(max_size, new_bytes.len());
+            data[..new_size].copy_from_slice(&bytes[..new_size]);
+            new_size
+        }
+        Err(_) => {
+            // If we failed to mutate the test case, fall back to the fuzzer's
+            // default mutation strategies.
+            return fuzzer_mutate(data, size, max_size);
+        }
+    }
 
-    // Update the fuzzer's raw data based on the mutated RGB color.
-    let new_bytes = rgb.to_bytes();
-    let new_size = std::cmp::min(max_size, new_bytes.len());
-    data[..new_size].copy_from_slice(&bytes[..new_size]);
-    new_size
 });
 # }
 ```
 
 ### Shrinking Test Cases
 
-You can configure a `MutationContext` to only perform mutations that "shrink"
+You can configure a `MutationBuilder` to only perform mutations that "shrink"
 their given values. When paired with a property or predicate function, doing so
 lets you easily build test-case reducers that find the smallest input that
 triggers a bug.
 
 ```rust
 # fn foo() -> mutatis::Result<()> {
-use mutatis::{mutators as m, MutationContext, Mutator};
+use mutatis::{mutators as m, Mutate, MutationBuilder};
 
 // Configure mutation to only shrink the input.
-let mut context = MutationContext::builder().shrink(true).build();
+let mut mtn = MutationBuilder::new().shrink(true);
 
 let mut value = u32::MAX;
 for _ in 0..10 {
-    m::default::<u32>().mutate(&mut context, &mut value)?;
+    mtn.mutate(&mut value)?;
     println!("shrunken value is {value}");
 }
 
@@ -394,66 +460,80 @@ for _ in 0..10 {
 # foo().unwrap()
 ```
 
-When implementing `Mutator` by hand, rather than relying on the
-`mutatis::mutator` module's combinators or the `derive(Mutator)` macro, be sure
-to check whether `context.shrink()` returns `true` and adjust your mutation
-strategy appropriately. Compared to the original input, a shrunken value should
+When implementing `Mutate` by hand, rather than relying on the
+`mutatis::mutator` module's combinators or the `derive(Mutate)` macro, be sure
+to check whether you're inside a shrinking session and adjust your potential
+mutations appropriately. Compared to the original input, a shrunken value should
 be simpler and less complex, have fewer members inside its inner `Vec`s and
-other container types, serialize to fewer bytes, etc...
+other container types, serialize to fewer bytes, etc... In general, checking for
+shrinking is only something that collections and "leaf" `Mutate` implementations
+need to worry about.
 
 ```rust
 # fn foo() -> mutatis::Result<()> {
 use mutatis::{
-    mutators as m, Error, GenerativeMutator, MutationContext, Mutator, Result,
-    ResultExt,
+    mutators as m, Error, Generate, Mutate, MutationBuilder, MutationSet,
+    Result, ResultExt,
 };
 
 /// A mutator that mutates `u32`s into powers of two.
-pub struct Pow2Mutator;
+pub struct PowersOfTwo;
 
-impl Mutator<u32> for Pow2Mutator {
+impl Mutate<u32> for PowersOfTwo {
     fn mutate(
         &mut self,
-        context: &mut MutationContext,
+        mutations: &mut MutationSet,
         value: &mut u32,
     ) -> Result<()> {
         // If we should only shrink the value, then only generate powers of two
         // less than the input. Otherwise, generate any power of two `u32`.
-        let max_shift = if context.shrink() {
-            value.ilog2().checked_sub(value.is_power_of_two() as u32).ok_or_else(|| {
-                // There are more powers of two to shrink to.
-                Error::mutator_exhausted()
-            })?
+        let max_log2 = if mutations.shrink() {
+            match value.ilog2().checked_sub(value.is_power_of_two() as u32) {
+                Some(s) => s,
+                // There are no more powers of two to shrink to, so early return
+                // and do not register any candidate mutations.
+                None => return Ok(()),
+            }
         } else {
             31
         };
-        dbg!(max_shift);
 
-        // Choose a random `log2(value)` between 0 and `max_shift`, inclusive.
-        let log2 = m::range(0..=max_shift).generate(context)?;
-        dbg!(log2);
+        mutations.mutation(|context| {
+            // Choose a random `log2(value)` between 0 and `max_log2`, inclusive.
+            let log2 = m::range(0..=max_log2).generate(context)?;
 
-        // value = 2^log2(value) = 1 << log2(value)
-        *value = 1 << log2;
+            // value = 2^log2(value) = 1 << log2(value)
+            *value = 1 << log2;
+
+            Ok(())
+        })?;
 
         Ok(())
     }
 }
 
-// Configure mutation to only shrink the input.
-let mut context = MutationContext::builder().shrink(true).build();
-
 let mut value = u32::MAX;
-for _ in 0..3 {
-    Pow2Mutator.mutate(&mut context, &mut value).ignore_mutator_exhausted()?;
+
+// Configure mutation to only shrink the input.
+let mut mtn = MutationBuilder::new().shrink(true).seed(19);
+
+for _ in 0..10 {
+    mtn.mutate_with(&mut PowersOfTwo, &mut value).ignore_exhausted()?;
     println!("shrunken value is {value}");
 }
 
 // Example output:
 //
-//     shrunken value is 65536
-//     shrunken value is 4096
-//     shrunken value is 512
+//     shrunken value is 8388608
+//     shrunken value is 8192
+//     shrunken value is 128
+//     shrunken value is 16
+//     shrunken value is 1
+//     shrunken value is 1
+//     shrunken value is 1
+//     shrunken value is 1
+//     shrunken value is 1
+//     shrunken value is 1
 # Ok(())
 # }
 # foo().unwrap()
@@ -498,17 +578,19 @@ details.
 **Note: none of this crate's features are enabled by default. You most likely
 want to enable `std`.**
 
-* `alloc`: Implement `Mutator`s for types in Rust's `alloc` crate and internally
+* `alloc`: Enable mutators for types in Rust's `alloc` crate and internally
   use features that the `alloc` crate provides.
 
-* `std`: Implement `Mutator`s for types in Rust's `std` crate and internally use
+* `std`: Enable mutators for types in Rust's `std` crate and internally use
   features that the `std` crate provides.
+
+* `log`: Enable logging with [the `log` crate](https://docs.rs/log).
 
 * `check`: Enable the `mutatis::check` module for writing property-based smoke
   tests with `mutatis`.
 
-* `derive`: Enable the `#[derive(Mutator)]` macro for automatically deriving
-  `Mutator` implementations for your types
+* `derive`: Enable the `#[derive(Mutate)]` macro for automatically deriving
+  mutators for your types
 
 ## Minimum Supported Rust Version
 

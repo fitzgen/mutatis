@@ -76,6 +76,7 @@
 //! ```
 
 use super::*;
+use crate::log;
 use crate::mutators as m;
 use std::fmt::{self, Debug};
 use std::panic;
@@ -283,7 +284,7 @@ impl Check {
         property: impl FnMut(&T) -> std::result::Result<(), S>,
     ) -> CheckResult<T>
     where
-        T: Clone + Debug + Default + DefaultMutator,
+        T: Clone + Debug + Default + DefaultMutate,
         S: ToString,
     {
         self.run(m::default::<T>(), [T::default()], property)
@@ -315,7 +316,7 @@ impl Check {
         mut property: impl FnMut(&T) -> std::result::Result<(), S>,
     ) -> CheckResult<T>
     where
-        M: Mutator<T>,
+        M: Mutate<T>,
         T: Clone + Debug,
         S: ToString,
     {
@@ -334,13 +335,13 @@ impl Check {
 
         // Second, run the check on mutated values derived from the corpus for
         // the configured iterations.
-        let mut context = MutationContext::default();
+        let mut builder = MutationBuilder::default();
         for _ in 0..self.iters {
-            let index = context.rng().gen_index(corpus.len()).unwrap();
+            let index = builder.context.rng().gen_index(corpus.len()).unwrap();
 
-            match mutator.mutate(&mut context, &mut corpus[index]) {
+            match builder.mutate_with(&mut mutator, &mut corpus[index]) {
                 Ok(()) => {}
-                Err(e) if e.is_mutator_exhausted() => {
+                Err(e) if e.is_exhausted() => {
                     corpus.swap_remove(index);
                     if corpus.is_empty() {
                         return Ok(());
@@ -380,7 +381,7 @@ impl Check {
         mut message: String,
     ) -> CheckResult<T>
     where
-        M: Mutator<T>,
+        M: Mutate<T>,
         T: Clone + Debug,
         S: ToString,
     {
@@ -391,15 +392,15 @@ impl Check {
 
         log::debug!("shrinking for {} iters...", self.shrink_iters);
 
-        let mut context = MutationContext::builder().shrink(true).build();
+        let mut builder = MutationBuilder::default().shrink(true);
 
         for _ in 0..self.shrink_iters {
             let mut candidate = value.clone();
 
-            match mutator.mutate(&mut context, &mut candidate) {
+            match builder.mutate_with(&mut mutator, &mut candidate) {
                 // If the mutator is exhausted, then don't keep trying to shrink
                 // the input and just report the final error.
-                Err(e) if e.is_mutator_exhausted() => break,
+                Err(e) if e.is_exhausted() => break,
 
                 // Ignore mutator errors during shrinking because it is more
                 // important to report the property failure.
