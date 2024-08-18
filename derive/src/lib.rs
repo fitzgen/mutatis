@@ -671,7 +671,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
     let mutate_method = quote! {
         fn mutate(
             &mut self,
-            mutations: &mut mutatis::MutationSet,
+            mutations: &mut mutatis::Candidates,
             value: &mut #ty_name,
         ) -> mutatis::Result<()> {
             #mutation_body

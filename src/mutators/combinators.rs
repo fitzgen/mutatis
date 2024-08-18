@@ -15,9 +15,9 @@ where
     M1: Mutate<T>,
     M2: Mutate<T>,
 {
-    fn mutate(&mut self, muts: &mut MutationSet, value: &mut T) -> Result<()> {
-        self.left.mutate(muts, value)?;
-        self.right.mutate(muts, value)?;
+    fn mutate(&mut self, c: &mut Candidates, value: &mut T) -> Result<()> {
+        self.left.mutate(c, value)?;
+        self.right.mutate(c, value)?;
         Ok(())
     }
 }
@@ -36,12 +36,12 @@ pub struct Map<M, F> {
 impl<M, F, T> Mutate<T> for Map<M, F>
 where
     M: Mutate<T>,
-    F: FnMut(&mut MutationContext, &mut T) -> Result<()>,
+    F: FnMut(&mut Context, &mut T) -> Result<()>,
 {
-    fn mutate(&mut self, muts: &mut MutationSet, value: &mut T) -> Result<()> {
-        match self.mutator.mutate(muts, value) {
+    fn mutate(&mut self, c: &mut Candidates, value: &mut T) -> Result<()> {
+        match self.mutator.mutate(c, value) {
             Err(e) if e.is_early_exit() => {
-                (self.f)(&mut muts.context, value)?;
+                (self.f)(&mut c.context, value)?;
                 Err(Error::early_exit())
             }
             res => res,
@@ -65,8 +65,8 @@ where
     F: FnMut(&mut T) -> &mut U,
 {
     #[inline]
-    fn mutate(&mut self, muts: &mut MutationSet, value: &mut T) -> Result<()> {
-        self.mutator.mutate(muts, (self.f)(value))
+    fn mutate(&mut self, c: &mut Candidates, value: &mut T) -> Result<()> {
+        self.mutator.mutate(c, (self.f)(value))
     }
 }
 
@@ -79,7 +79,6 @@ where
 #[derive(Clone, Debug, Default)]
 pub struct Just<T> {
     pub(crate) value: T,
-    exhausted: bool,
 }
 
 /// Create a mutator that always produces the same, given value.
@@ -91,15 +90,15 @@ pub struct Just<T> {
 ///
 /// ```
 /// # fn foo() -> mutatis::Result<()> {
-/// use mutatis::{mutators as m, Mutate, MutationBuilder};
+/// use mutatis::{mutators as m, Mutate, Session};
 ///
 /// let mut mutator = m::just(42).or(m::range(1..=10));
 ///
 /// let mut x = 0;
 ///
-/// let mut mtn = MutationBuilder::new();
+/// let mut session = Session::new();
 /// for _ in 0..5 {
-///     mtn.mutate_with(&mut mutator, &mut x)?;
+///     session.mutate_with(&mut mutator, &mut x)?;
 ///     println!("mutated x is {x}");
 /// }
 ///
@@ -115,10 +114,7 @@ pub struct Just<T> {
 /// # foo().unwrap();
 /// ```
 pub fn just<T>(value: T) -> Just<T> {
-    Just {
-        value,
-        exhausted: false,
-    }
+    Just { value }
 }
 
 impl<T> Mutate<T> for Just<T>
@@ -126,15 +122,8 @@ where
     T: Clone,
 {
     #[inline]
-    fn mutate(&mut self, muts: &mut MutationSet<'_>, value: &mut T) -> Result<()> {
-        if !self.exhausted {
-            muts.mutation(|_| {
-                *value = self.value.clone();
-                self.exhausted = true;
-                Ok(())
-            })?;
-        }
-        Ok(())
+    fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut T) -> Result<()> {
+        c.mutation(|_| Ok(*value = self.value.clone()))
     }
 }
 
@@ -142,7 +131,7 @@ impl<T> Generate<T> for Just<T>
 where
     T: Clone,
 {
-    fn generate(&mut self, _ctx: &mut MutationContext) -> Result<T> {
+    fn generate(&mut self, _ctx: &mut Context) -> Result<T> {
         Ok(self.value.clone())
     }
 }

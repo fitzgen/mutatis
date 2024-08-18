@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![no_std]
 #![deny(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 #[cfg(feature = "alloc")]
@@ -10,9 +11,9 @@ extern crate alloc;
 #[macro_use]
 extern crate std;
 
-mod log;
-
 mod error;
+mod log;
+pub mod mutators;
 mod rng;
 
 use core::ops;
@@ -22,46 +23,61 @@ pub use rng::Rng;
 
 #[cfg(feature = "check")]
 pub mod check;
-pub mod mutators;
 
 #[cfg(feature = "derive")]
 pub use mutatis_derive::Mutate;
 
-/// A builder for configuring a mutation session.
+/// A mutation session and its configuration.
 ///
 /// This type allows you to configure things like setting the RNG seed, or
 /// whether to only perform shrinking mutations.
 ///
-/// Create a new builder via the [`MutationBuilder::new()`] method.
+/// A session should be reused while a particular value, or set of values, are
+/// being repeatedly mutated.
 ///
 /// # Example
 ///
 /// ```
-/// use mutatis::MutationBuilder;
+/// # fn foo() -> mutatis::Result<()> {
+/// use mutatis::Session;
 ///
-/// let context = MutationBuilder::new()
-///     // Configure the RNG seed, changing which random mutation a mutator
-///     // chooses to make.
-///     .seed(0x12345678)
-///     // Only perform mutations that "shrink" the test case.
-///     .shrink(true);
+/// // Create a new mutation session.
+/// let mut session = Session::new()
+///     // Configure the RNG seed, changing which random mutations are chosen.
+///     .seed(0x12345678);
+///
+/// // Mutate a value a few times inside this session.
+/// let mut x = 93;
+/// for _ in 0..3 {
+///     session.mutate(&mut x)?;
+///     println!("mutated x is {x}");
+/// }
+///
+/// // Example output:
+/// //
+/// //     mutated x is -906367562
+/// //     mutated x is 766527557
+/// //     mutated x is 132130383
+/// # Ok(())
+/// # }
+/// # foo().unwrap();
 /// ```
-#[derive(Clone, Debug)]
-pub struct MutationBuilder {
-    context: MutationContext,
+#[derive(Debug)]
+pub struct Session {
+    context: Context,
 }
 
-impl Default for MutationBuilder {
+impl Default for Session {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl MutationBuilder {
-    /// Create a new, default `MutationBuilder`.
+impl Session {
+    /// Create a new, default `Session`.
     pub fn new() -> Self {
         Self {
-            context: MutationContext {
+            context: Context {
                 rng: Rng::default(),
                 shrink: false,
             },
@@ -83,26 +99,26 @@ impl MutationBuilder {
     }
 
     /// Mutate the given `value` with its default mutator and within the
-    /// constraints of this `MutationBuilder`'s configuration.
+    /// constraints of this `Session`'s configuration.
     ///
     /// The default mutator for a type is defined by the [`DefaultMutate`] trait
     /// implementation for that type.
     ///
     /// To use a custom mutator, rather than the default mutator, use the
-    /// [`mutate_with`] method instead.
+    /// [`mutate_with`][Session::mutate_with] method instead.
     ///
     /// # Example
     ///
     /// ```
     /// # fn foo() -> mutatis::Result<()> {
-    /// use mutatis::MutationBuilder;
+    /// use mutatis::Session;
     ///
     /// let mut x = Some(1234i32);
     ///
-    /// let mut mtn = MutationBuilder::new().seed(0xaabbccdd);
+    /// let mut session = Session::new().seed(0xaabbccdd);
     ///
     /// for _ in 0..5 {
-    ///     mtn.mutate(&mut x)?;
+    ///     session.mutate(&mut x)?;
     ///     println!("mutated x is {x:?}");
     /// }
     ///
@@ -125,26 +141,27 @@ impl MutationBuilder {
     }
 
     /// Mutate the given `value` with the given `mutator` and within the
-    /// constraints of this `MutationBuilder`'s configuration.
+    /// constraints of this `Session`'s configuration.
     ///
-    /// This is similar to the [`mutate`] method, but allows you to specify a
-    /// custom mutator to use instead of the default mutator for `value`'s type.
+    /// This is similar to the [`mutate`][Session::mutate] method, but allows
+    /// you to specify a custom mutator to use instead of the default mutator
+    /// for `value`'s type.
     ///
     /// # Example
     ///
     /// ```
     /// # fn foo() -> mutatis::Result<()> {
-    /// use mutatis::{mutators as m, MutationBuilder};
+    /// use mutatis::{mutators as m, Session};
     ///
     /// let mut res = Ok(1234i32);
     ///
     /// // Create a custom mutator for `Result<i32, bool>` values.
     /// let mut mutator = m::result(m::range(-10..=10), m::just(true));
     ///
-    /// let mut mtn = MutationBuilder::new().seed(0x1984);
+    /// let mut session = Session::new().seed(0x1984);
     ///
     /// for _ in 0..5 {
-    ///     mtn.mutate_with(&mut mutator, &mut res)?;
+    ///     session.mutate_with(&mut mutator, &mut res)?;
     ///     println!("mutated res is {res:?}");
     /// }
     ///
@@ -164,43 +181,25 @@ impl MutationBuilder {
     }
 }
 
-/// The context for a set of mutations.
+/// The context for the current mutation.
 ///
 /// This context includes things like configuration options (whether to only
-/// perform "shrinking" mutations or not) as well as a random number generator
-/// (RNG) to help choose which mutation to perform when there are multiple
-/// options (for example, choosing between adding, deleting, or modifying a
-/// character in a string).
+/// perform "shrinking" mutations or not) as well as a random number generator.
 ///
-/// Every mutation operation is given a context.
+/// Every candidate mutation, which is a closure that will perform its
+/// associated changes when invoked, is given a context.
 ///
-/// Contexts may be reused across multiple mutations, if you want.
-///
-/// New contexts are created via getting a [`MutationBuilder`] from the
-/// [`MutationContext::builder()`] method, configuring the builder, and then
-/// calling its [`build()`][MutationBuilder::build] method to get the
-/// newly-created context. See the documentation for [`MutationBuilder`]
-/// for an example of building and configuring a new context.
-#[derive(Clone, Debug)]
-pub struct MutationContext {
+/// You do not create contexts directly. You create [`Session`s][crate::Session]
+/// which internally manages contexts for you, passing them to the candidate
+/// mutation closure that was chosen for execution as needed.
+#[derive(Debug)]
+pub struct Context {
     rng: Rng,
     shrink: bool,
 }
 
-impl MutationContext {
-    /// Create a new builder for a `MutationContext`.
-    ///
-    /// This allows you to configure mutations, such as setting the seed for the
-    /// random number generator, before finally building the `MutationContext`.
-    ///
-    /// See the documentation for [`MutationBuilder`] for example usage.
-    #[inline]
-    #[must_use]
-    pub fn builder() -> MutationBuilder {
-        MutationBuilder::default()
-    }
-
-    /// Get this mutation context's random number generator.
+impl Context {
+    /// Get this context's random number generator.
     #[inline]
     #[must_use]
     pub fn rng(&mut self) -> &mut Rng {
@@ -233,25 +232,25 @@ impl MutationContext {
         mutator: &mut impl Mutate<T>,
         value: &mut T,
     ) -> Result<()> {
-        self.choose_and_apply_mutation(value, |muts, value| mutator.mutate(muts, value))
+        self.choose_and_apply_mutation(value, |c, value| mutator.mutate(c, value))
     }
 
     fn choose_and_apply_mutation<T>(
         &mut self,
         value: &mut T,
-        mut mutate_impl: impl FnMut(&mut MutationSet, &mut T) -> Result<()>,
+        mut mutate_impl: impl FnMut(&mut Candidates, &mut T) -> Result<()>,
     ) -> Result<()> {
         log::trace!("=== choosing an applying a mutation ===");
 
         // Count how many mutations we *could* perform.
-        let mut muts = MutationSet {
+        let mut candidates = Candidates {
             context: self,
             phase: Phase::Count(0),
             applied_mutation: false,
         };
-        mutate_impl(&mut muts, value)?;
+        mutate_impl(&mut candidates, value)?;
 
-        let count = match muts.phase {
+        let count = match candidates.phase {
             Phase::Count(count) => usize::try_from(count).unwrap(),
             Phase::Mutate { .. } => unreachable!(),
         };
@@ -263,16 +262,16 @@ impl MutationContext {
         }
 
         // Choose a random target mutation to actually perform.
-        let target = muts.context.rng().gen_index(count).unwrap();
+        let target = candidates.context.rng().gen_index(count).unwrap();
         log::trace!("targeting mutation {target}");
         debug_assert!(target < count);
 
         // Perform the chosen target mutation.
-        muts.phase = Phase::Mutate {
+        candidates.phase = Phase::Mutate {
             current: 0,
             target: u32::try_from(target).unwrap(),
         };
-        match mutate_impl(&mut muts, value) {
+        match mutate_impl(&mut candidates, value) {
             Err(e) if e.is_early_exit() => {
                 log::trace!("mutation applied successfully");
                 Ok(())
@@ -284,24 +283,23 @@ impl MutationContext {
             }
 
             // We should have found the target mutation, applied it, and then
-            // broken out of the mutation loop by returning
-            // `Err(Error::early_exit())`. So either we are facing a
-            // nondeterministic mutations enumeration or a mutator is missing a
-            // `?` and is failing to propagate the early-exit error to
-            // us. Differentiate between these two cases via the
-            // `applied_mutation` flag.
-            Ok(()) if muts.applied_mutation => {
+            // broken out of mutation enumeration by returning an early-exit
+            // error. So either we are facing a nondeterministic mutation
+            // enumeration or a mutator is missing a `?` and is failing to
+            // propagate the early-exit error to us. Differentiate between these
+            // two cases via the `applied_mutation` flag.
+            Ok(()) if candidates.applied_mutation => {
                 panic!(
                     "We applied a mutation but did not receive an early-exit error \
                      from the mutator. This means that errors are not always being \
                      propagated, for example a `?` is missing from a call to the \
-                     `MutationSet::mutation` method. Errors must be propagated \
+                     `Candidates::mutation` method. Errors must be propagated \
                      in `Mutate::mutate` et al method implementations; failure to do \
                      so can lead to bugs, panics, and degraded performance.",
                 )
             }
             Ok(()) => {
-                let current = match muts.phase {
+                let current = match candidates.phase {
                     Phase::Mutate { current, .. } => current,
                     _ => unreachable!(),
                 };
@@ -322,9 +320,7 @@ impl MutationContext {
         value: &mut T,
         range: &ops::RangeInclusive<T>,
     ) -> Result<()> {
-        self.choose_and_apply_mutation(value, |muts, value| {
-            mutator.mutate_in_range(muts, value, range)
-        })
+        self.choose_and_apply_mutation(value, |c, value| mutator.mutate_in_range(c, value, range))
     }
 }
 
@@ -340,13 +336,13 @@ enum Phase {
 /// perform on a value. It is passed to the [`Mutate::mutate`] trait method, and
 /// provides a way to register candidate mutations, as well as to check if
 /// shrinking is enabled.
-pub struct MutationSet<'a> {
-    context: &'a mut MutationContext,
+pub struct Candidates<'a> {
+    context: &'a mut Context,
     phase: Phase,
     applied_mutation: bool,
 }
 
-impl<'a> MutationSet<'a> {
+impl<'a> Candidates<'a> {
     /// Register a candidate mutation that can be applied to a value.
     ///
     /// This method is called by [`Mutate::mutate`] implementations to register
@@ -359,10 +355,7 @@ impl<'a> MutationSet<'a> {
     /// See the [`Mutate::mutate`] trait method documentation for more
     /// information on this method's use.
     #[inline]
-    pub fn mutation(
-        &mut self,
-        mut f: impl FnMut(&mut MutationContext) -> Result<()>,
-    ) -> Result<()> {
+    pub fn mutation(&mut self, mut f: impl FnMut(&mut Context) -> Result<()>) -> Result<()> {
         match &mut self.phase {
             Phase::Count(count) => {
                 *count += 1;
@@ -372,7 +365,7 @@ impl<'a> MutationSet<'a> {
                 assert!(
                     *current <= *target,
                     "{current} <= {target}; did you forget to `?`-propagate the \
-                     result of a `MutationSet::mutation` call?",
+                     result of a `Candidates::mutation` call?",
                 );
                 if *current == *target {
                     self.applied_mutation = true;
@@ -409,21 +402,21 @@ impl<'a> MutationSet<'a> {
 ///
 /// Many types implement the `DefaultMutate` trait, which provides a default
 /// mutator for that type. You can use this default mutator by calling
-/// [`mutate`][MutationBuilder::mutate] on a `MutationBuilder` with a value of
+/// [`mutate`][Session::mutate] on a `Session` with a value of
 /// that type.
 ///
 /// ```
 /// # fn foo() -> mutatis::Result<()> {
 /// # #![cfg(feature = "std")]
-/// use mutatis::{MutationContext, MutationBuilder};
+/// use mutatis::{Context, Session};
 ///
-/// let mut builder = MutationBuilder::new();
+/// let mut session = Session::new();
 ///
 /// let mut x = 1234;
-/// builder.mutate(&mut x)?;
+/// session.mutate(&mut x)?;
 ///
 /// for _ in 0..5 {
-///     builder.mutate(&mut x)?;
+///     session.mutate(&mut x)?;
 ///     println!("mutated x is {x}");
 /// }
 ///
@@ -440,7 +433,7 @@ impl<'a> MutationSet<'a> {
 /// ```
 /// # fn foo() -> mutatis::Result<()> {
 /// # #![cfg(feature = "std")]
-/// use mutatis::{mutators as m, Mutate, MutationBuilder};
+/// use mutatis::{mutators as m, Mutate, Session};
 ///
 /// // Define a mutator for `u32`s that only creates multiples-of-four
 /// let mut mutator = m::u32()
@@ -451,9 +444,9 @@ impl<'a> MutationSet<'a> {
 ///
 /// // Mutate a value a bunch of times!
 /// let mut x = 1234;
-/// let mut builder = MutationBuilder::new();
+/// let mut session = Session::new();
 /// for _ in 0..5 {
-///     builder.mutate_with(&mut mutator, &mut x)?;
+///     session.mutate_with(&mut mutator, &mut x)?;
 ///     println!("mutated x is {x}");
 /// }
 ///
@@ -475,33 +468,36 @@ impl<'a> MutationSet<'a> {
 /// mutations it can perform for a given value. In this case, the mutator may
 /// return an error of kind [`ErrorKind::Exhausted`]. Many mutators are
 /// effectively inexhaustible (or it would be prohibitively expensive to
-/// precisely track whether they've emitted every possible mutation of a value,
-/// like a mutator that flips a single bit in a `u32`) and therefore it is valid
-/// for a mutator to never report exhaustion.
+/// precisely track whether they've already emitted every possible variant of a
+/// value) and therefore it is valid for a mutator to never report exhaustion.
 ///
 /// You may also ignore exhaustion errors via the
 /// [`ResultExt::ignore_exhausted`] extension method.
 ///
-/// # Many to Many
+/// Note that you should never return an `ErrorKind::Exhausted` error from your
+/// own manual `Mutate` implementations. Instead, simply avoid registering any
+/// candidate mutations.
+///
+/// # Many-to-Many
 ///
 /// Note that the relationship between mutator types and mutated types is not
 /// one-to-one: a single mutator type can mutate many different types, and a
-/// single type can be mutated by many mutator types. This gives you the
-/// flexibility to define new mutators for existing types (including those that
-/// are not defined by your own crate).
+/// single type can be mutated by many different mutator types. This gives you
+/// the flexibility to define new mutators for existing types (including those
+/// that are not defined by your own crate).
 ///
 /// ```
 /// # fn foo () {
 /// # #![cfg(feature = "derive")]
 /// use mutatis::{
-///     mutators as m, DefaultMutate, Mutate, MutationBuilder, MutationSet,
+///     mutators as m, DefaultMutate, Mutate, Session, Candidates,
 ///     Result,
 /// };
 ///
-/// #[derive(Mutate)] // Derive a default mutator.
+/// #[derive(Mutate)] // Derive a default mutator for `Foo`s.
 /// pub struct Foo(u32);
 ///
-/// // Define and implement a second mutator type for `Foo` by hand!
+/// // Also define and implement a second mutator type for `Foo` by hand!
 ///
 /// pub struct AlignedFooMutator{
 ///     inner: <Foo as DefaultMutate>::DefaultMutate,
@@ -509,7 +505,7 @@ impl<'a> MutationSet<'a> {
 /// }
 ///
 /// impl Mutate<Foo> for AlignedFooMutator {
-///     fn mutate(&mut self, mutations: &mut MutationSet, foo: &mut Foo) -> Result<()> {
+///     fn mutate(&mut self, mutations: &mut Candidates, foo: &mut Foo) -> Result<()> {
 ///         self.inner
 ///             .by_ref()
 ///             .map(|_context, foo| {
@@ -534,14 +530,14 @@ where
     ///
     /// # Calling the `mutate` Method
     ///
-    /// If you just want to mutate a value, use [`MutationBuilder::mutate`] or
-    /// [`MutationBuilder::mutate_with`] instead of invoking this trait method
+    /// If you just want to mutate a value, use [`Session::mutate`] or
+    /// [`Session::mutate_with`] instead of invoking this trait method
     /// directly. See their documentation for more details.
     ///
     /// # Implementing the `mutate` Method
     ///
     /// Register every mutation that a mutator *could* perform by invoking the
-    /// [`mutations.mutation(...)`][MutationSet::mutation] function, passing in
+    /// [`mutations.mutation(...)`][Candidates::mutation] function, passing in
     /// a closure that performs that mutation, updating `value` and `self` as
     /// necessary.
     ///
@@ -576,7 +572,7 @@ where
     /// ```
     /// # fn foo() -> mutatis::Result<()> {
     /// use mutatis::{
-    ///     mutators as m, Generate, Mutate, MutationBuilder, MutationSet,
+    ///     mutators as m, Generate, Mutate, Session, Candidates,
     ///     Result,
     /// };
     ///
@@ -587,7 +583,7 @@ where
     /// impl Mutate<(u64, u64)> for OrderedPairs {
     ///     fn mutate(
     ///         &mut self,
-    ///         mutations: &mut MutationSet<'_>,
+    ///         mutations: &mut Candidates<'_>,
     ///         pair: &mut (u64, u64),
     ///     ) -> Result<()> {
     ///         // We *cannot* mutate `self` or `pair` out here.
@@ -626,9 +622,9 @@ where
     /// let mut pair = (1000, 2000);
     ///
     /// // And mutate it a bunch of times!
-    /// let mut mtn = MutationBuilder::new();
+    /// let mut session = Session::new();
     /// for _ in 0..3 {
-    ///     mtn.mutate_with(&mut OrderedPairs, &mut pair)?;
+    ///     session.mutate_with(&mut OrderedPairs, &mut pair)?;
     ///     println!("mutated pair is {pair:?}");
     /// }
     ///
@@ -641,7 +637,7 @@ where
     /// # }
     /// # foo().unwrap();
     /// ```
-    fn mutate(&mut self, mutations: &mut MutationSet<'_>, value: &mut T) -> Result<()>;
+    fn mutate(&mut self, mutations: &mut Candidates<'_>, value: &mut T) -> Result<()>;
 
     // Provided methods.
 
@@ -652,9 +648,9 @@ where
     ///
     /// ```
     /// # fn foo() -> mutatis::Result<()> {
-    /// use mutatis::{mutators as m, Mutate, MutationBuilder};
+    /// use mutatis::{mutators as m, Mutate, Session};
     ///
-    /// let mut mtn = MutationBuilder::new();
+    /// let mut session = Session::new();
     ///
     /// // Either generate `-1`...
     /// let mut mutator = m::just(-1)
@@ -669,7 +665,7 @@ where
     /// let mut value = 0;
     ///
     /// for _ in 0..5 {
-    ///     mtn.mutate_with(&mut mutator, &mut value)?;
+    ///     session.mutate_with(&mut mutator, &mut value)?;
     ///     println!("mutated value is {value:#x}");
     /// }
     ///
@@ -700,9 +696,9 @@ where
     ///
     /// ```
     /// # fn foo() -> mutatis::Result<()> {
-    /// use mutatis::{mutators as m, Mutate, MutationBuilder};
+    /// use mutatis::{mutators as m, Mutate, Session};
     ///
-    /// let mut mtn = MutationBuilder::new();
+    /// let mut session = Session::new();
     ///
     /// let mut mutator = m::i32().map(|context, value| {
     ///     // Ensure that the value is always positive.
@@ -715,7 +711,7 @@ where
     /// let mut value = -42;
     ///
     /// for _ in 0..10 {
-    ///     mtn.mutate_with(&mut mutator, &mut value)?;
+    ///     session.mutate_with(&mut mutator, &mut value)?;
     ///     assert!(value > 0, "the mutated value is always positive");
     /// }
     /// # Ok(())
@@ -727,7 +723,7 @@ where
     fn map<F>(self, f: F) -> mutators::Map<Self, F>
     where
         Self: Sized,
-        F: FnMut(&mut MutationContext, &mut T) -> Result<()>,
+        F: FnMut(&mut Context, &mut T) -> Result<()>,
     {
         mutators::Map { mutator: self, f }
     }
@@ -738,7 +734,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use mutatis::{mutators as m, Mutate, MutationBuilder};
+    /// use mutatis::{mutators as m, Mutate, Session};
     /// # fn foo() -> mutatis::Result<()> {
     ///
     /// #[derive(Debug)]
@@ -748,9 +744,9 @@ where
     ///
     /// let mut mutator = m::u32().proj(|x: &mut NewType| &mut x.0);
     ///
-    /// let mut mtn = MutationBuilder::new();
+    /// let mut session = Session::new();
     /// for _ in 0..3 {
-    ///    mtn.mutate_with(&mut mutator, &mut value)?;
+    ///    session.mutate_with(&mut mutator, &mut value)?;
     ///    println!("mutated value is {value:?}");
     /// }
     ///
@@ -781,7 +777,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use mutatis::{mutators as m, Mutate, MutationBuilder};
+    /// use mutatis::{mutators as m, Mutate, Session};
     /// # fn foo() -> mutatis::Result<()> {
     ///
     /// let mut mutator = m::u32().map(|_context, x| {
@@ -791,19 +787,19 @@ where
     ///
     ///
     /// let mut value = 1234;
-    /// let mut mtn = MutationBuilder::new();
+    /// let mut session = Session::new();
     ///
     /// {
     ///     let mut borrowed_mutator = mutator.by_ref().map(|_context, x| {
     ///         *x = x.wrapping_add(1);
     ///         Ok(())
     ///     });
-    ///     mtn.mutate_with(&mut borrowed_mutator, &mut value)?;
+    ///     session.mutate_with(&mut borrowed_mutator, &mut value)?;
     ///     println!("first mutated value is {value}");
     /// }
     ///
     /// // In the outer scope, we can still use the original mutator.
-    /// mtn.mutate_with(&mut mutator, &mut value)?;
+    /// session.mutate_with(&mut mutator, &mut value)?;
     /// println!("second mutated value is {value}");
     ///
     /// // Example output:
@@ -834,8 +830,8 @@ impl<M, T> Mutate<T> for &mut M
 where
     M: Mutate<T>,
 {
-    fn mutate(&mut self, muts: &mut MutationSet, value: &mut T) -> Result<()> {
-        (**self).mutate(muts, value)
+    fn mutate(&mut self, c: &mut Candidates, value: &mut T) -> Result<()> {
+        (**self).mutate(c, value)
     }
 }
 
@@ -851,21 +847,21 @@ pub trait Generate<T>: Mutate<T> {
     ///
     /// Implementations may use the `context`'s random number generator in the
     /// process of generating a `T`.
-    fn generate(&mut self, context: &mut MutationContext) -> Result<T>;
+    fn generate(&mut self, context: &mut Context) -> Result<T>;
 }
 
 /// A mutator that supports clamping mutated values to within a given range.
 ///
 /// To use `MutateInRange` implementations, use the
-/// `[MutationBuilder::mutate_in_range]` method,
-/// `[MutationBuilder::mutate_in_range_with]` method, or
+/// `[Session::mutate_in_range]` method,
+/// `[Session::mutate_in_range_with]` method, or
 /// [`mutators::range()`][crate::mutators::range] combinator.
 pub trait MutateInRange<T>: Mutate<T> {
     /// Mutate a value, ensuring that the resulting mutation is within the given
     /// range.
     fn mutate_in_range(
         &mut self,
-        mutations: &mut MutationSet,
+        mutations: &mut Candidates,
         value: &mut T,
         range: &ops::RangeInclusive<T>,
     ) -> Result<()>;

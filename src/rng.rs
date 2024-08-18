@@ -1,16 +1,16 @@
 //! A thin-but-stable wrapper over `rand::rngs::SmallRng` that provides a few
 //! more conveniences for our use-cases.
 
-use rand::{rngs::SmallRng, Rng as _, SeedableRng};
+use core::sync::atomic::{self, AtomicU32};
 
-const DEFAULT_SEED: u64 = 0x12345678_12345678;
+use rand::{rngs::SmallRng, Rng as _, SeedableRng};
 
 /// A pseudorandom number generator.
 ///
 /// Not cryptographically secure.
 ///
 /// You can attain a reference to an `Rng` via the
-/// [`MutationContext::rng`][crate::MutationContext::rng] method.
+/// [`Context::rng`][crate::Context::rng] method.
 #[derive(Clone, Debug)]
 pub struct Rng {
     inner: SmallRng,
@@ -18,7 +18,8 @@ pub struct Rng {
 
 impl Default for Rng {
     fn default() -> Self {
-        Self::new(DEFAULT_SEED)
+        static DEFAULT_SEED: AtomicU32 = AtomicU32::new(0);
+        Self::new(DEFAULT_SEED.fetch_add(1, atomic::Ordering::Relaxed).into())
     }
 }
 

@@ -90,7 +90,7 @@ use std::prelude::v1::*;
 /// test case and an error message.
 ///
 /// If there is some other kind of error while running the check, for example if
-/// a `Mutator` does not support the given `MutationContext` configuration, then
+/// a `Mutator` does not support the given `Context` configuration, then
 /// this is `Err(CheckError::Error(_))`.
 pub type CheckResult<T> = std::result::Result<(), CheckError<T>>;
 
@@ -335,11 +335,11 @@ impl Check {
 
         // Second, run the check on mutated values derived from the corpus for
         // the configured iterations.
-        let mut builder = MutationBuilder::default();
+        let mut session = Session::new();
         for _ in 0..self.iters {
-            let index = builder.context.rng().gen_index(corpus.len()).unwrap();
+            let index = session.context.rng().gen_index(corpus.len()).unwrap();
 
-            match builder.mutate_with(&mut mutator, &mut corpus[index]) {
+            match session.mutate_with(&mut mutator, &mut corpus[index]) {
                 Ok(()) => {}
                 Err(e) if e.is_exhausted() => {
                     corpus.swap_remove(index);
@@ -392,12 +392,12 @@ impl Check {
 
         log::debug!("shrinking for {} iters...", self.shrink_iters);
 
-        let mut builder = MutationBuilder::default().shrink(true);
+        let mut session = Session::new().shrink(true);
 
         for _ in 0..self.shrink_iters {
             let mut candidate = value.clone();
 
-            match builder.mutate_with(&mut mutator, &mut candidate) {
+            match session.mutate_with(&mut mutator, &mut candidate) {
                 // If the mutator is exhausted, then don't keep trying to shrink
                 // the input and just report the final error.
                 Err(e) if e.is_exhausted() => break,

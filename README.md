@@ -73,9 +73,9 @@ mutate a value:
 # fn foo() -> mutatis::Result<()> {
 let mut point = (42, 36);
 
-let mut mtn = mutatis::MutationBuilder::new();
+let mut session = mutatis::Session::new();
 for _ in 0..3 {
-    mtn.mutate(&mut point)?;
+    session.mutate(&mut point)?;
     println!("mutated point is {point:?}");
 }
 
@@ -96,7 +96,7 @@ data structure:
 
 ```rust
 # fn foo() -> mutatis::Result<()> {
-use mutatis::{mutators as m, Mutate, MutationBuilder};
+use mutatis::{mutators as m, Mutate, Session};
 
 /// A silly monster type.
 #[derive(Debug)]
@@ -149,9 +149,9 @@ let mut monster = Monster {
 };
 
 // ...and mutate it a bunch of times!
-let mut mtn = MutationBuilder::new();
+let mut session = Session::new();
 for _ in 0..5 {
-    mtn.mutate_with(&mut mutator, &mut monster)?;
+    session.mutate_with(&mut mutator, &mut monster)?;
     println!("mutated monster is {monster:?}");
 }
 
@@ -184,7 +184,7 @@ Then simply slap `#[derive(Mutate)]` onto your type definitions:
 ```rust
 # fn foo() -> mutatis::Result<()> {
 #![cfg(feature = "derive")]
-use mutatis::{Mutate, MutationBuilder};
+use mutatis::{Mutate, Session};
 
 // The derive macro will automatically generate a `Vec2Mutator` type that
 // implements `Mutate<Vec2>` and register it as the default mutator for
@@ -202,9 +202,9 @@ let mut v = Vec2 {
 };
 
 // ...and mutate it a bunch of times!
-let mut mtn = MutationBuilder::new();
+let mut session = Session::new();
 for _ in 0..5 {
-    mtn.mutate(&mut v)?;
+    session.mutate(&mut v)?;
     println!("mutated v is {v:?}");
 }
 
@@ -227,7 +227,7 @@ mutated:
 ```rust
 # fn foo() -> mutatis::Result<()> {
 #![cfg(feature = "derive")]
-use mutatis::{mutators as m, Mutate, MutationBuilder};
+use mutatis::{mutators as m, Mutate, Session};
 
 #[derive(Debug, Mutate)]
 pub struct MyType(u32, bool, u32);
@@ -246,9 +246,9 @@ let mut mutator = MyTypeMutator::new(
 
 let mut value = MyType(1, false, 2);
 
-let mut mtn = MutationBuilder::new();
+let mut session = Session::new();
 for _ in 0..5 {
-    mtn.mutate_with(&mut mutator, &mut value)?;
+    session.mutate_with(&mut mutator, &mut value)?;
     println!("mutated value is {value:?}");
 }
 
@@ -338,7 +338,7 @@ color, and then updates the fuzzer's test case based on the mutated RGB color.
 #[cfg(feature = "derive")]
 # mod example {
 use libfuzzer_sys::{fuzzer_mutate, fuzz_mutator, fuzz_target};
-use mutatis::{mutators as m, Mutate, MutationBuilder};
+use mutatis::{mutators as m, Mutate, Session};
 
 /// A red-green-blue color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -401,10 +401,10 @@ fuzz_mutator!(|data: &mut [u8], size: usize, max_size: usize, seed: u32| {
     let mut rgb = Rgb::from_bytes(bytes);
 
     // Configure the mutation with the seed that libfuzzer gave us.
-    let mut mtn = MutationBuilder::new().seed(seed.into());
+    let mut session = Session::new().seed(seed.into());
 
     // Mutate `rgb` using its default, derived mutator!
-    match mtn.mutate(&mut rgb) {
+    match session.mutate(&mut rgb) {
         Ok(()) => {
             // Update the fuzzer's raw data based on the mutated RGB color.
             let new_bytes = rgb.to_bytes();
@@ -425,21 +425,21 @@ fuzz_mutator!(|data: &mut [u8], size: usize, max_size: usize, seed: u32| {
 
 ### Shrinking Test Cases
 
-You can configure a `MutationBuilder` to only perform mutations that "shrink"
+You can configure a `Session` to only perform mutations that "shrink"
 their given values. When paired with a property or predicate function, doing so
 lets you easily build test-case reducers that find the smallest input that
 triggers a bug.
 
 ```rust
 # fn foo() -> mutatis::Result<()> {
-use mutatis::{mutators as m, Mutate, MutationBuilder};
+use mutatis::{mutators as m, Mutate, Session};
 
 // Configure mutation to only shrink the input.
-let mut mtn = MutationBuilder::new().shrink(true);
+let mut session = Session::new().shrink(true);
 
 let mut value = u32::MAX;
 for _ in 0..10 {
-    mtn.mutate(&mut value)?;
+    session.mutate(&mut value)?;
     println!("shrunken value is {value}");
 }
 
@@ -472,7 +472,7 @@ need to worry about.
 ```rust
 # fn foo() -> mutatis::Result<()> {
 use mutatis::{
-    mutators as m, Error, Generate, Mutate, MutationBuilder, MutationSet,
+    mutators as m, Error, Generate, Mutate, Session, Candidates,
     Result, ResultExt,
 };
 
@@ -482,7 +482,7 @@ pub struct PowersOfTwo;
 impl Mutate<u32> for PowersOfTwo {
     fn mutate(
         &mut self,
-        mutations: &mut MutationSet,
+        mutations: &mut Candidates,
         value: &mut u32,
     ) -> Result<()> {
         // If we should only shrink the value, then only generate powers of two
@@ -515,10 +515,10 @@ impl Mutate<u32> for PowersOfTwo {
 let mut value = u32::MAX;
 
 // Configure mutation to only shrink the input.
-let mut mtn = MutationBuilder::new().shrink(true).seed(19);
+let mut session = Session::new().shrink(true).seed(19);
 
 for _ in 0..10 {
-    mtn.mutate_with(&mut PowersOfTwo, &mut value).ignore_exhausted()?;
+    session.mutate_with(&mut PowersOfTwo, &mut value).ignore_exhausted()?;
     println!("shrunken value is {value}");
 }
 

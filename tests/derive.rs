@@ -1,6 +1,6 @@
 #![cfg(all(feature = "derive", feature = "std"))]
 
-use mutatis::{mutators as m, DefaultMutate, Mutate, MutationBuilder, ResultExt};
+use mutatis::{mutators as m, DefaultMutate, Mutate, Session, ResultExt};
 
 #[test]
 fn derive_on_struct_with_named_fields() -> anyhow::Result<()> {
@@ -10,9 +10,9 @@ fn derive_on_struct_with_named_fields() -> anyhow::Result<()> {
         y: bool,
     }
 
-    let mut mtn = MutationBuilder::new();
+    let mut session = Session::new();
     let mut value = MyStruct::default();
-    mtn.mutate(&mut value)?;
+    session.mutate(&mut value)?;
     Ok(())
 }
 
@@ -21,9 +21,9 @@ fn derive_on_struct_with_unnamed_fields() -> anyhow::Result<()> {
     #[derive(Debug, Default, Mutate)]
     struct MyStruct(u8, bool);
 
-    let mut mtn = MutationBuilder::new();
+    let mut session = Session::new();
     let mut value = MyStruct::default();
-    mtn.mutate(&mut value)?;
+    session.mutate(&mut value)?;
     Ok(())
 }
 
@@ -32,9 +32,9 @@ fn derive_on_unit_struct() -> anyhow::Result<()> {
     #[derive(Debug, Default, Mutate)]
     struct MyUnitStruct;
 
-    let mut mtn = MutationBuilder::new();
+    let mut session = Session::new();
     let mut value = MyUnitStruct::default();
-    mtn.mutate(&mut value).ignore_exhausted()?;
+    session.mutate(&mut value).ignore_exhausted()?;
     Ok(())
 }
 
@@ -47,18 +47,18 @@ fn derive_on_enum() -> anyhow::Result<()> {
         Named { x: u8, y: bool },
     }
 
-    let mut mtn = MutationBuilder::new();
+    let mut session = Session::new();
 
     let mut value = MyEnum::Unit;
-    mtn.mutate(&mut value)
+    session.mutate(&mut value)
         // TODO: support mutating from one enum variant to another
         .ignore_exhausted()?;
 
     let mut value = MyEnum::Unnamed(0, false);
-    mtn.mutate(&mut value)?;
+    session.mutate(&mut value)?;
 
     let mut value = MyEnum::Named { x: 0, y: false };
-    mtn.mutate(&mut value)?;
+    session.mutate(&mut value)?;
 
     Ok(())
 }
@@ -69,10 +69,10 @@ fn mutator_name() -> anyhow::Result<()> {
     #[mutatis(mutator_name = MyCoolMutator)]
     struct MyStruct(u8);
 
-    let mut mtn = MutationBuilder::new();
+    let mut session = Session::new();
     let mut mutator = MyCoolMutator::new(m::u8());
     let mut value = MyStruct::default();
-    mtn.mutate_with(&mut mutator, &mut value)?;
+    session.mutate_with(&mut mutator, &mut value)?;
     Ok(())
 }
 
@@ -82,9 +82,9 @@ fn mutator_doc() -> anyhow::Result<()> {
     #[mutatis(mutator_doc = "This is a cool mutator")]
     struct MyStruct(u8);
 
-    let mut mtn = MutationBuilder::new();
+    let mut session = Session::new();
     let mut value = MyStruct::default();
-    mtn.mutate(&mut value)?;
+    session.mutate(&mut value)?;
     Ok(())
 }
 
@@ -98,13 +98,13 @@ fn ignore_field() -> anyhow::Result<()> {
         y: u64,
     }
 
-    let mut mtn = MutationBuilder::new();
+    let mut session = Session::new();
 
     let orig = MyStruct::default();
     let mut value = orig.clone();
 
     while value == orig {
-        mtn.mutate(&mut value)?;
+        session.mutate(&mut value)?;
         assert_eq!(orig.y, value.y);
     }
 
@@ -121,13 +121,13 @@ fn default_mutator() -> anyhow::Result<()> {
         y: u64,
     }
 
-    let mut mtn = MutationBuilder::new();
+    let mut session = Session::new();
 
     // Only an `x` mutator parameter because `y` is always the default mutator.
     let mut mutator = MyStructMutator::new(m::u64());
 
     let mut value = MyStruct::default();
-    mtn.mutate_with(&mut mutator, &mut value)?;
+    session.mutate_with(&mut mutator, &mut value)?;
 
     Ok(())
 }
@@ -151,7 +151,7 @@ fn derive_with_generic_parameters() -> anyhow::Result<()> {
         w: U,
     }
 
-    let mut mtn = MutationBuilder::new();
+    let mut session = Session::new();
 
     let x = 5;
     let y = 10;
@@ -159,7 +159,7 @@ fn derive_with_generic_parameters() -> anyhow::Result<()> {
     let w = 100;
     let mut value = MyGenericStruct { x: &x, y: &y, z, w };
 
-    mtn.mutate(&mut value)?;
+    session.mutate(&mut value)?;
 
     Ok(())
 }
@@ -178,9 +178,9 @@ fn no_default_mutator() -> anyhow::Result<()> {
         type DefaultMutate = MyStructMutator<m::U64>;
     }
 
-    let mut mtn = MutationBuilder::new();
+    let mut session = Session::new();
     let mut mutator = MyStructMutator::new(m::u64());
     let mut value = MyStruct { x: 0 };
-    mtn.mutate_with(&mut mutator, &mut value)?;
+    session.mutate_with(&mut mutator, &mut value)?;
     Ok(())
 }
