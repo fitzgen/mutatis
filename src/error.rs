@@ -14,7 +14,7 @@ pub trait ResultExt {
     /// # Examples
     ///
     /// ```
-    /// use mutatis::{Error, Result, ResultExt};
+    /// use mutatis::error::{Error, Result, ResultExt};
     ///
     /// let result: Result<()> = Err(Error::exhausted());
     /// let result = result.ignore_exhausted();
@@ -61,7 +61,7 @@ enum ErrorInner {
 /// # Examples
 ///
 /// ```
-/// use mutatis::{Error, ErrorKind};
+/// use mutatis::{Error, error::ErrorKind};
 ///
 /// let error: Error = {
 ///     // ...
@@ -200,7 +200,7 @@ impl Error {
 /// # Examples
 ///
 /// ```
-/// use mutatis::{Error, ErrorKind};
+/// use mutatis::error::{Error, ErrorKind};
 ///
 /// let error: Error = {
 ///     // ...
@@ -251,7 +251,7 @@ impl From<Error> for ErrorKind {
 /// # Examples
 ///
 /// ```
-/// use mutatis::ErrorMessage;
+/// use mutatis::error::ErrorMessage;
 ///
 /// let msg = ErrorMessage::new("something went wrong");
 /// assert_eq!(msg.as_str(), "something went wrong");

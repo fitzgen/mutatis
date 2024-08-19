@@ -46,7 +46,7 @@
 //!             // minimal failing test case by running 1000 shrink iterations.
 //!             .shrink_iters(1000)
 //!             // Run the property check!
-//!             .run(
+//!             .run_with(
 //!                 // The mutator we'll use to generate new values.
 //!                 m::array(m::range(0..=0xff)),
 //!                 // The initial corpus of values to check and to derive new
@@ -188,7 +188,7 @@ impl<T> CheckError<T> {
 /// use mutatis::{check::Check, mutators as m};
 ///
 /// let failure = Check::new()
-///     .run(
+///     .run_with(
 ///         m::default::<bool>(),
 ///         [true],
 ///         |b| {
@@ -272,14 +272,15 @@ impl Check {
         self
     }
 
-    /// Run this configured `Check` with a default initial `T` value and
-    /// mutator.
+    /// Run this configured `Check` with a default initial `T` value and the
+    /// default mutator.
     ///
     /// This is a convenience method that is equivalent to calling
-    /// [`run`][Check::run] with [`m::default::<T>()`][crate::mutators::default]
-    /// and [`T::default()`][core::default::Default::default] as the only value
-    /// in the initial corpus.
-    pub fn run_with_defaults<T, S>(
+    /// [`run_with`][Check::run_with] with
+    /// [`m::default::<T>()`][crate::mutators::default] and
+    /// [`[T::default()]`][core::default::Default::default] as the only value in
+    /// the initial corpus.
+    pub fn run<T, S>(
         &self,
         property: impl FnMut(&T) -> std::result::Result<(), S>,
     ) -> CheckResult<T>
@@ -287,10 +288,10 @@ impl Check {
         T: Clone + Debug + Default + DefaultMutate,
         S: ToString,
     {
-        self.run(m::default::<T>(), [T::default()], property)
+        self.run_with(m::default::<T>(), [T::default()], property)
     }
 
-    /// Run this configured `Check`.
+    /// Run this configured `Check` with the given corpus and mutator.
     ///
     /// The `initial_corpus` is used to seed the check with some initial
     /// values. If you have some known edge cases that you want to test, you can
@@ -309,7 +310,7 @@ impl Check {
     /// check is considered to have failed and the failing value is shrunk down
     /// to a minimal failing value. You can configure how much effor is put into
     /// shrinking via the [`shrink_iters`][Check::shrink_iters] method.
-    pub fn run<M, T, S>(
+    pub fn run_with<M, T, S>(
         &self,
         mut mutator: M,
         initial_corpus: impl IntoIterator<Item = T>,
@@ -441,9 +442,9 @@ mod tests {
     }
 
     #[test]
-    fn check_run_okay() {
+    fn check_run_with_okay() {
         check()
-            .run(m::just(true), [true], |b: &bool| {
+            .run_with(m::just(true), [true], |b: &bool| {
                 if *b {
                     Ok(())
                 } else {
@@ -454,9 +455,9 @@ mod tests {
     }
 
     #[test]
-    fn check_run_fail() {
+    fn check_run_with_fail() {
         let failure = check()
-            .run(m::bool(), [true], |b: &bool| {
+            .run_with(m::bool(), [true], |b: &bool| {
                 if *b {
                     Ok(())
                 } else {
@@ -471,8 +472,8 @@ mod tests {
     }
 
     #[test]
-    fn check_run_empty_corpus() {
-        let result = check().run(m::bool(), [], |b: &bool| {
+    fn check_run_with_empty_corpus() {
+        let result = check().run_with(m::bool(), [], |b: &bool| {
             if *b {
                 Ok(())
             } else {
@@ -485,10 +486,10 @@ mod tests {
     }
 
     #[test]
-    fn check_run_fail_and_shrink() {
+    fn check_run_with_fail_and_shrink() {
         let failure = check()
             .shrink_iters(1000)
-            .run(m::u8(), [u8::MAX], |x: &u8| {
+            .run_with(m::u8(), [u8::MAX], |x: &u8| {
                 if *x < 10 {
                     Ok(())
                 } else {
@@ -503,8 +504,8 @@ mod tests {
     }
 
     #[test]
-    fn check_run_fail_on_panic() {
-        let result = check().run(m::bool(), [true], |_: &bool| -> Result<(), String> {
+    fn check_run_with_fail_on_panic() {
+        let result = check().run_with(m::bool(), [true], |_: &bool| -> Result<(), String> {
             panic!("oh no!")
         });
         assert!(result.is_err());
@@ -512,10 +513,10 @@ mod tests {
     }
 
     #[test]
-    fn check_run_fail_on_panic_and_shrink() {
+    fn check_run_with_fail_on_panic_and_shrink() {
         let failure = check()
             .shrink_iters(1000)
-            .run(m::u8(), [u8::MAX], |x: &u8| -> Result<(), String> {
+            .run_with(m::u8(), [u8::MAX], |x: &u8| -> Result<(), String> {
                 assert!(*x < 10);
                 Ok(())
             })

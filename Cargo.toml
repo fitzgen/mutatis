@@ -12,8 +12,8 @@ readme = "README.md"
 # XXX: Keep this in sync with the version in `derive/Cargo.toml`.
 version = "0.2.0"
 
-# XXX: Keep this in sync with the MSRV documented in `README.md` and the
-# `rust-version` in `derive/Cargo.toml`.
+# XXX: Keep this in sync with the MSRV documented in `src/_guide/msrv.rs` and
+# the `rust-version` in `derive/Cargo.toml`.
 rust-version = "1.80.0"
 
 [features]

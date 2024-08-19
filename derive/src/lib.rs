@@ -419,7 +419,7 @@ fn gen_mutator_type_def(
     let vis = &input.vis;
     let name = &input.ident;
 
-    let impl_default = container_attrs.default_mutator.unwrap_or(true);
+    let impl_default = container_attrs.default_mutate.unwrap_or(true);
     let mutator_name =
         mutator_ty.mutator_name_with_generics(MutatorNameGenericsKind::Impl { impl_default });
 
@@ -699,7 +699,7 @@ fn gen_default_mutator_impl(
     mutator_ty: &MutatorType,
     container_attrs: &ContainerAttributes,
 ) -> Result<TokenStream> {
-    let impl_default = container_attrs.default_mutator.unwrap_or(true);
+    let impl_default = container_attrs.default_mutate.unwrap_or(true);
     if !impl_default {
         return Ok(quote! {});
     }

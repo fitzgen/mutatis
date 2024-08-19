@@ -1,6 +1,6 @@
 #![cfg(all(feature = "derive", feature = "std"))]
 
-use mutatis::{mutators as m, DefaultMutate, Mutate, Session, ResultExt};
+use mutatis::{error::ResultExt, mutators as m, DefaultMutate, Mutate, Session};
 
 #[test]
 fn derive_on_struct_with_named_fields() -> anyhow::Result<()> {
@@ -50,7 +50,8 @@ fn derive_on_enum() -> anyhow::Result<()> {
     let mut session = Session::new();
 
     let mut value = MyEnum::Unit;
-    session.mutate(&mut value)
+    session
+        .mutate(&mut value)
         // TODO: support mutating from one enum variant to another
         .ignore_exhausted()?;
 
@@ -112,12 +113,12 @@ fn ignore_field() -> anyhow::Result<()> {
 }
 
 #[test]
-fn default_mutator() -> anyhow::Result<()> {
+fn default_mutate_field() -> anyhow::Result<()> {
     #[derive(Debug, Default, Mutate)]
     struct MyStruct {
         x: u64,
 
-        #[mutatis(default_mutator)]
+        #[mutatis(default_mutate)]
         y: u64,
     }
 
@@ -167,7 +168,7 @@ fn derive_with_generic_parameters() -> anyhow::Result<()> {
 #[test]
 fn no_default_mutator() -> anyhow::Result<()> {
     #[derive(Debug, Mutate)]
-    #[mutatis(default_mutator = false)]
+    #[mutatis(default_mutate = false)]
     struct MyStruct {
         x: u64,
     }

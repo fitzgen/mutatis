@@ -68,7 +68,7 @@ fn parse_attribute_internals(meta_list: &MetaList) -> Result<Option<FieldBehavio
     })?;
     match token.to_string().as_ref() {
         "ignore" => Ok(None),
-        "default_mutator" => Ok(Some(FieldBehavior::DefaultMutate)),
+        "default_mutate" => Ok(Some(FieldBehavior::DefaultMutate)),
         _ => {
             let msg = format!("Unknown option for #[{MUTATIS_ATTRIBUTE_NAME}]: `{token}`");
             Err(syn::Error::new(token.span(), msg))

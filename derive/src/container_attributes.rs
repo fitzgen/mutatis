@@ -18,19 +18,19 @@ pub struct ContainerAttributes {
     pub mutator_doc: Option<Vec<LitStr>>,
 
     /// An optional flag to specify whether the derived mutator should implement
-    /// `DefaultMutator` for the type or not. The default behavior is `true`.
+    /// `DefaultMutate` for the type or not. The default behavior is `true`.
     ///
     /// ```ignore
-    /// #[mutatis(default_mutator = false)]
+    /// #[mutatis(default_mutate = false)]
     /// ```
-    pub default_mutator: Option<bool>,
+    pub default_mutate: Option<bool>,
 }
 
 impl ContainerAttributes {
     pub fn from_derive_input(derive_input: &DeriveInput) -> Result<Self> {
         let mut mutator_name = None;
         let mut mutator_doc = None;
-        let mut default_mutator = None;
+        let mut default_mutate = None;
 
         for attr in &derive_input.attrs {
             if !attr.path().is_ident(MUTATIS_ATTRIBUTE_NAME) {
@@ -86,16 +86,16 @@ impl ContainerAttributes {
                                 ..
                             }),
                         ..
-                    }) if path.is_ident("default_mutator") => {
-                        if default_mutator.is_some() {
+                    }) if path.is_ident("default_mutate") => {
+                        if default_mutate.is_some() {
                             return Err(Error::new_spanned(
                                 attr,
                                 format!(
-                                    "invalid `{MUTATIS_ATTRIBUTE_NAME}` attribute: duplicate `default_mutator`",
+                                    "invalid `{MUTATIS_ATTRIBUTE_NAME}` attribute: duplicate `default_mutate`",
                                 ),
                             ));
                         }
-                        default_mutator = Some(bool_lit.value);
+                        default_mutate = Some(bool_lit.value);
                     }
 
                     Meta::NameValue(MetaNameValue {
@@ -113,10 +113,7 @@ impl ContainerAttributes {
                     _ => {
                         return Err(Error::new_spanned(
                             attr,
-                            format!(
-                                "invalid `{MUTATIS_ATTRIBUTE_NAME}` attribute: \
-                                 expected `bound = \"..\"` or `mutator_name = \"..\"`",
-                            ),
+                            format!("invalid `{MUTATIS_ATTRIBUTE_NAME}` attribute"),
                         ))
                     }
                 }
@@ -126,7 +123,7 @@ impl ContainerAttributes {
         Ok(Self {
             mutator_name,
             mutator_doc,
-            default_mutator,
+            default_mutate,
         })
     }
 }

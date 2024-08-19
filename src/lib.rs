@@ -11,20 +11,25 @@ extern crate alloc;
 #[macro_use]
 extern crate std;
 
-mod error;
+pub mod _guide;
+pub mod error;
 mod log;
 pub mod mutators;
 mod rng;
 
 use core::ops;
 
-pub use error::*;
+pub use error::{Error, Result};
 pub use rng::Rng;
 
 #[cfg(feature = "check")]
 pub mod check;
 
 #[cfg(feature = "derive")]
+/// Automatically derive a mutator for a type.
+///
+/// See [the `#[derive(Mutate)]` section of the
+/// guide][crate::_guide::derive_macro] for details.
 pub use mutatis_derive::Mutate;
 
 /// A mutation session and its configuration.
@@ -466,17 +471,21 @@ impl<'a> Candidates<'a> {
 ///
 /// A mutator may become *exhausted*, meaning that it doesn't have any more
 /// mutations it can perform for a given value. In this case, the mutator may
-/// return an error of kind [`ErrorKind::Exhausted`]. Many mutators are
-/// effectively inexhaustible (or it would be prohibitively expensive to
+/// return an error of kind
+/// [`ErrorKind::Exhausted`][crate::error::ErrorKind::Exhausted]. Many mutators
+/// are effectively inexhaustible (or it would be prohibitively expensive to
 /// precisely track whether they've already emitted every possible variant of a
 /// value) and therefore it is valid for a mutator to never report exhaustion.
 ///
 /// You may also ignore exhaustion errors via the
-/// [`ResultExt::ignore_exhausted`] extension method.
+/// [`mutatis::error::ResultExt::ignore_exhausted`][crate::error::ResultExt::ignore_exhausted]
+/// extension method.
 ///
 /// Note that you should never return an `ErrorKind::Exhausted` error from your
 /// own manual `Mutate` implementations. Instead, simply avoid registering any
-/// candidate mutations.
+/// candidate mutations and, if no other sibling or parent mutators have any
+/// potential mutations either, then the library will return an exhaustion error
+/// for you.
 ///
 /// # Many-to-Many
 ///
