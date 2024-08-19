@@ -61,7 +61,9 @@ hook.
 To randomly mutate a value with its default, off-the-shelf mutator:
 
 * Create a [`mutatis::Session`](https://docs.rs/mutatis/latest/mutatis/struct.Session.html).
-* Call `session.mutate`, passing in the value you wish to mutate.
+* Call
+  [`session.mutate`](https://docs.rs/mutatis/latest/mutatis/struct.Session.html#method.mutate),
+  passing in the value you wish to mutate.
 
 Here's a simple example of using `mutatis` and its default mutators to randomly
 mutate a value:
@@ -97,11 +99,14 @@ typically imported under the alias `m`.
 
 To randomly mutate a value with a custom mutator:
 
-* Create the custom mutator with from `mutatis::mutators` combinators and
-  `Mutate` trait adapter methods.
+* Create the custom mutator from
+  [`mutatis::mutators`](https://docs.rs/mutatis/latest/mutatis/mutators/)
+  combinators and `Mutate` trait adapter methods.
 * Create a [`mutatis::Session`](https://docs.rs/mutatis/latest/mutatis/struct.Session.html).
-* Call `session.mutate_with`, passing in the value you wish to mutate and the
-  mutator you wish to use to perform the mutation.
+* Call
+  [`session.mutate_with`](https://docs.rs/mutatis/latest/mutatis/struct.Session.html#method.mutate_with),
+  passing in the value you wish to mutate and the mutator you wish to use to
+  perform the mutation.
 
 Here's an example of using `mutatis` to define a custom mutator for a custom
 `struct` type that has multiple fields, and maintains a relationship between the
