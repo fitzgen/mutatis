@@ -275,7 +275,7 @@ The API reference documentation is available on
 
 #### Guide
 
-[Check out the guide](https://docs.rs/mutatis/latest/mutatis/guide/index.html)
+[Check out the guide](https://docs.rs/mutatis/latest/mutatis/_guide/index.html)
 for tutorials, discussions, and recipes; everything else that doesn't fall into
 the API-reference category.
 
