@@ -13,7 +13,7 @@
     <span> | </span>
     <a href="https://docs.rs/mutatis">Docs</a>
     <span> | </span>
-    <a href="https://docs.rs/mutatis/latest/mutatis/guide/index.html">Guide</a>
+    <a href="https://docs.rs/mutatis/latest/mutatis/_guide/index.html">Guide</a>
     <span> | </span>
     <a href="https://github.com/fitzgen/mutatis/blob/main/CONTRIBUTING.md">Contributing</a>
   </h3>
