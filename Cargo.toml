@@ -10,7 +10,7 @@ name = "mutatis"
 readme = "README.md"
 
 # XXX: Keep this in sync with the version in `derive/Cargo.toml`.
-version = "0.2.0"
+version = "0.3.0"
 
 # XXX: Keep this in sync with the MSRV documented in `src/_guide/msrv.rs` and
 # the `rust-version` in `derive/Cargo.toml`.
@@ -41,7 +41,7 @@ all-features = true
 
 [dependencies]
 rand = { version = "0.8.5", default-features = false, features = ["small_rng"] }
-mutatis-derive = { version = "=0.2.0", path = "derive", optional = true }
+mutatis-derive = { version = "=0.3.0", path = "derive", optional = true }
 log = { version = "0.4.22", optional = true }
 
 [dev-dependencies]
