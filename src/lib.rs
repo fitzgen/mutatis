@@ -844,6 +844,15 @@ where
     }
 }
 
+impl<M, T> Generate<T> for &mut M
+where
+    M: Generate<T>,
+{
+    fn generate(&mut self, context: &mut Context) -> Result<T> {
+        (**self).generate(context)
+    }
+}
+
 /// A trait for types that have a default mutator.
 pub trait DefaultMutate {
     /// The default mutator for this type.
