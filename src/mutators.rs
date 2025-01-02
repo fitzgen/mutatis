@@ -16,8 +16,10 @@ mod core_impls;
 pub use combinators::*;
 pub use core_impls::*;
 
-// TODO: mod alloc;
-// TODO: pub use alloc::*;
+#[cfg(feature = "alloc")]
+mod alloc_impls;
+#[cfg(feature = "alloc")]
+pub use alloc_impls::*;
 
 // TODO: mod std;
 // TODO: pub use std::*;
