@@ -7,7 +7,7 @@
 //! ```
 
 use super::*;
-use ::core::ops;
+use ::core::{marker::PhantomData, ops};
 use rand::Rng;
 
 mod combinators;
@@ -23,6 +23,114 @@ pub use alloc_impls::*;
 
 // TODO: mod std;
 // TODO: pub use std::*;
+
+/// A mutator that doesn't do anything.
+///
+/// See the [`nop`] function to create new `Nop` mutator instances and for
+/// example usage.
+#[derive(Clone, Debug)]
+pub struct Nop<T> {
+    _phantom: PhantomData<fn(&mut T)>,
+}
+
+/// Create a mutator that doesn't do anything.
+///
+/// This can be useful as the initial mutator in a mutator-combinator chain.
+///
+/// # Example
+///
+/// ```
+/// use mutatis::{mutators as m, Mutate, Session};
+///
+/// let mut mutator = m::nop::<(u32, u32)>()
+///     .map(|ctx, (a, b)| {
+///         let x = ctx.rng().gen_u32();
+///         let y = ctx.rng().gen_u32();
+///         *a = x.min(y);
+///         *b = x.max(y);
+///         Ok(())
+///     });
+/// let mut session = Session::new();
+///
+/// let mut value = (0, 0);
+/// session.mutate_with(&mut mutator, &mut value).unwrap();
+///
+/// assert!(value.0 <= value.1);
+/// ```
+pub fn nop<T>() -> Nop<T> {
+    Nop {
+        _phantom: PhantomData,
+    }
+}
+
+impl<T> Mutate<T> for Nop<T> {
+    fn mutate(&mut self, c: &mut Candidates<'_>, _value: &mut T) -> Result<()> {
+        c.mutation(|_| Ok(()))
+    }
+}
+
+/// A mutator constructed from a function.
+pub struct FromFn<F, T> {
+    func: F,
+    _phantom: PhantomData<fn(&mut T)>,
+}
+
+/// Create a mutator from a function.
+///
+/// The function is given a [`Context`] and an `&mut T` value, and must return a
+/// [`mutatis::Result<()>`].
+///
+/// # Example
+///
+/// ```
+/// # fn foo() -> mutatis::Result<()> {
+/// use mutatis::{mutators as m, Context, Mutate, Session};
+///
+/// let mut mutator = m::from_fn(|ctx: &mut Context, pair: &mut (u32, u32)| {
+///     pair.0 = ctx.rng().gen_u32();
+///     pair.1 = if ctx.rng().gen_bool() {
+///         pair.0.wrapping_add(1)
+///     } else {
+///         pair.0.wrapping_sub(1)
+///     };
+///     Ok(())
+/// });
+/// let mut session = Session::new();
+///
+/// let mut value = (0, 0);
+///
+/// for _ in 0..5 {
+///     session.mutate_with(&mut mutator, &mut value)?;
+///     println!("{value:?}");
+/// }
+///
+/// // Example output:
+///  //
+/// //     (1886093101, 1886093102)
+/// //     (3852925062, 3852925063)
+/// //     (1697131274, 1697131275)
+/// //     (4193528377, 4193528378)
+/// //     (3958122412, 3958122411)
+
+/// # Ok(())
+/// # }
+/// # foo().unwrap();
+/// ```
+pub fn from_fn<F, T>(func: F) -> FromFn<F, T> {
+    FromFn {
+        func,
+        _phantom: PhantomData,
+    }
+}
+
+impl<F, T> Mutate<T> for FromFn<F, T>
+where
+    F: FnMut(&mut Context, &mut T) -> Result<()>,
+{
+    fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut T) -> Result<()> {
+        c.mutation(|ctx| (self.func)(ctx, value))
+    }
+}
 
 /// A convenience function to get the default mutator for a type.
 ///
