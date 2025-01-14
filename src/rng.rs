@@ -54,11 +54,11 @@ impl Rng {
     /// If `len` is `0`, then `None` is returned.
     #[inline]
     pub fn gen_index(&mut self, len: usize) -> Option<usize> {
-        if len == 0 {
-            return None;
+        match len {
+            0 => None,
+            1 => Some(0),
+            n => Some(self.inner.gen_range(0..n)),
         }
-
-        Some(self.inner.gen_range(0..len))
     }
 
     /// Choose a random element from an iterator.
