@@ -48,6 +48,20 @@ where
     }
 }
 
+impl<M, T> Generate<core::option::Option<T>> for Option<M>
+where
+    M: Generate<T>,
+{
+    #[inline]
+    fn generate(&mut self, context: &mut Context) -> Result<core::option::Option<T>> {
+        if context.rng().gen_bool() {
+            Ok(None)
+        } else {
+            Ok(Some(self.mutator.generate(context)?))
+        }
+    }
+}
+
 impl<T> DefaultMutate for core::option::Option<T>
 where
     T: DefaultMutate,
@@ -103,6 +117,16 @@ where
     }
 }
 
+impl<M, T> Generate<core::option::Option<T>> for Some<M>
+where
+    M: Generate<T>,
+{
+    #[inline]
+    fn generate(&mut self, context: &mut Context) -> Result<core::option::Option<T>> {
+        Ok(Some(self.mutator.generate(context)?))
+    }
+}
+
 /// A mutator for `Option<T>` values that always produces `None` values.
 ///
 /// See the [`none()`] function to create a new `None` mutator and for example
@@ -142,5 +166,12 @@ impl<T> Mutate<core::option::Option<T>> for None {
             c.mutation(|_| Ok(*value = None))?;
         }
         Ok(())
+    }
+}
+
+impl<T> Generate<core::option::Option<T>> for None {
+    #[inline]
+    fn generate(&mut self, _context: &mut Context) -> Result<core::option::Option<T>> {
+        Ok(None)
     }
 }

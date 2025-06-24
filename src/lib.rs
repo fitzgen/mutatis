@@ -184,6 +184,88 @@ impl Session {
     pub fn mutate_with<T>(&mut self, mutator: &mut impl Mutate<T>, value: &mut T) -> Result<()> {
         self.context.mutate_with(mutator, value)
     }
+
+    /// Generate a given `T` with its default mutator.
+    ///
+    /// The default mutator for a type is defined by the [`DefaultMutate`] trait
+    /// implementation for that type.
+    ///
+    /// To use a custom mutator, rather than the default mutator, use the
+    /// [`generate_with`][Session::generate_with] method instead.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn foo() -> mutatis::Result<()> {
+    /// use mutatis::Session;
+    ///
+    /// let mut session = Session::new().seed(0xaabbccdd);
+    ///
+    /// for _ in 0..5 {
+    ///     let x = session.generate::<u8>()?;
+    ///     println!("generated x is {x:?}");
+    /// }
+    ///
+    /// // Example output:
+    /// //
+    /// //     generated x is 127
+    /// //     generated x is 247
+    /// //     generated x is 211
+    /// //     generated x is 245
+    /// //     generated x is 86
+    /// # Ok(())
+    /// # }
+    /// # foo().unwrap();
+    /// ```
+    pub fn generate<T>(&mut self) -> Result<T>
+    where
+        T: DefaultMutate,
+        T::DefaultMutate: Generate<T>,
+    {
+        let mut generator = T::DefaultMutate::default();
+        generator.generate(&mut self.context)
+    }
+
+    /// Generate a given `T` with its default mutator.
+    ///
+    /// The default mutator for a type is defined by the [`DefaultMutate`] trait
+    /// implementation for that type.
+    ///
+    /// To use a custom mutator, rather than the default mutator, use the
+    /// [`generate_with`][Session::generate_with] method instead.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn foo() -> mutatis::Result<()> {
+    /// use mutatis::{mutators as m, Session};
+    ///
+    /// let mut session = Session::new().seed(0x12345678);
+    ///
+    /// // Create a mutator/generator for `Option<u32>` values, where the `u32`
+    /// // is always in the range 10 to 20 inclusive.
+    /// let mut mutator = m::option(m::range(10..=20));
+    ///
+    /// // Generate some values with that generation strategy.
+    /// for _ in 0..5 {
+    ///     let x = session.generate_with::<Option<u32>>(&mut mutator)?;
+    ///     println!("generated x is {x:?}");
+    /// }
+    ///
+    /// // Example output:
+    /// //
+    /// //     generated x is Some(15)
+    /// //     generated x is Some(12)
+    /// //     generated x is Some(18)
+    /// //     generated x is Some(18)
+    /// //     generated x is None
+    /// # Ok(())
+    /// # }
+    /// # foo().unwrap();
+    /// ```
+    pub fn generate_with<T>(&mut self, generator: &mut impl Generate<T>) -> Result<T> {
+        generator.generate(&mut self.context)
+    }
 }
 
 /// The context for the current mutation.
