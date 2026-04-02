@@ -34,7 +34,7 @@ jobs:
   test:
     strategy:
       matrix:
-        rust: ["stable", "beta", "nightly", "1.80.0"]
+        rust: ["stable", "beta", "nightly", "1.91.0"]
     runs-on: ubuntu-latest
     steps:
     - name: Install `rustup`
