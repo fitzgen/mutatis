@@ -14,7 +14,7 @@ version = "0.4.0"
 
 # XXX: Keep this in sync with the MSRV documented in `src/_guide/msrv.rs` and
 # the `rust-version` in `derive/Cargo.toml`.
-rust-version = "1.80.0"
+rust-version = "1.91.0"
 
 [features]
 # Implement `Mutator`s for types in Rust's `alloc` crate and internally use
