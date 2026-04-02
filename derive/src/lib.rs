@@ -542,9 +542,6 @@ fn gen_mutator_ctor(mutator_ty: &MutatorType) -> Result<TokenStream> {
 }
 
 fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<TokenStream> {
-    // TODO: make a list of all the individual mutations we *could* make, and
-    // then choose only one of them to actually perform.
-
     let impl_generics = mutator_ty.mutator_impl_generics();
 
     let ty_name = mutator_ty.ty_name_with_generics();
