@@ -2,9 +2,13 @@ use super::*;
 use crate::Result;
 use core::{cmp, ops};
 
+mod cell;
 mod option;
+mod ref_cell;
 mod result;
+pub use cell::*;
 pub use option::*;
+pub use ref_cell::*;
 pub use result::*;
 
 /// The default mutator for `bool` values.
@@ -660,7 +664,5 @@ where
 {
     type DefaultMutate = Array<N, T::DefaultMutate>;
 }
-
-// TODO: cell, refcell
 
 // TODO: duration
