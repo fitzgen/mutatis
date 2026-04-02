@@ -71,12 +71,33 @@ where
             })?;
         }
 
+
+        // Swap two elements.
+        if value.len() >= 2 {
+            c.mutation(|ctx| {
+                let i = ctx.rng().gen_index(value.len()).unwrap();
+                let j = ctx.rng().gen_index(value.len()).unwrap();
+                value.swap(i, j);
+                Ok(())
+            })?;
+        }
+
         // Mutate an existing element.
         for x in value.iter_mut() {
             self.mutator.mutate(c, x)?;
         }
 
         Ok(())
+    }
+}
+
+impl<M, T> Generate<alloc::collections::VecDeque<T>> for VecDeque<M>
+where
+    M: Generate<T>,
+{
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> Result<alloc::collections::VecDeque<T>> {
+        self.generate_via_mutate(ctx, 1)
     }
 }
 

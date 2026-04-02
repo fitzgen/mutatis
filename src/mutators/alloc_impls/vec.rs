@@ -1,5 +1,4 @@
 use super::*;
-use crate::error::ResultExt;
 
 /// The default mutator for `Vec<T>` values.
 ///
@@ -66,6 +65,16 @@ where
             })?;
         }
 
+        // Swap two elements.
+        if value.len() >= 2 {
+            c.mutation(|ctx| {
+                let i = ctx.rng().gen_index(value.len()).unwrap();
+                let j = ctx.rng().gen_index(value.len()).unwrap();
+                value.swap(i, j);
+                Ok(())
+            })?;
+        }
+
         // Mutate an existing element.
         for x in value {
             self.mutator.mutate(c, x)?;
@@ -81,13 +90,7 @@ where
 {
     #[inline]
     fn generate(&mut self, ctx: &mut Context) -> Result<alloc::vec::Vec<T>> {
-        let mut session = Session::new().seed(ctx.rng().gen_u64());
-
-        let mut v = alloc::vec::Vec::<T>::default();
-        for _ in 0..5 {
-            session.mutate_with(self, &mut v).ignore_exhausted()?;
-        }
-        Ok(v)
+        self.generate_via_mutate(ctx, 1)
     }
 }
 

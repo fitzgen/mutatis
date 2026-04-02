@@ -85,6 +85,17 @@ where
     }
 }
 
+impl<M, T> Generate<alloc::collections::BinaryHeap<T>> for BinaryHeap<M>
+where
+    M: Generate<T>,
+    T: Ord,
+{
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> Result<alloc::collections::BinaryHeap<T>> {
+        self.generate_via_mutate(ctx, 1)
+    }
+}
+
 impl<T> DefaultMutate for alloc::collections::BinaryHeap<T>
 where
     T: DefaultMutate + Ord,

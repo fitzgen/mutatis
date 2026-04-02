@@ -117,6 +117,18 @@ where
     }
 }
 
+impl<KM, VM, K, V> Generate<std::collections::HashMap<K, V>> for HashMap<KM, VM>
+where
+    KM: Generate<K>,
+    VM: Generate<V> + Mutate<V>,
+    K: Eq + Hash,
+{
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> Result<std::collections::HashMap<K, V>> {
+        self.generate_via_mutate(ctx, 1)
+    }
+}
+
 impl<K, V> DefaultMutate for std::collections::HashMap<K, V>
 where
     K: DefaultMutate + Eq + Hash,

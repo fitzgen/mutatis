@@ -31,11 +31,11 @@ pub struct HashSet<M> {
 ///
 /// // Example output:
 /// //
-/// //     items = {[154]}
-/// //     items = {[154], [131]}
-/// //     items = {[131], []}
-/// //     items = {[], [127]}
-/// //     items = {[], [127], [182, 115]}
+/// //     items = {[146]}
+/// //     items = {[194]}
+/// //     items = {[164, 194]}
+/// //     items = {[164, 194], [122]}
+/// //     items = {[164, 194], [122, 118]}
 /// # Ok(()) }
 /// # foo().unwrap();
 /// ```
@@ -103,6 +103,17 @@ where
         }
 
         Ok(())
+    }
+}
+
+impl<M, T> Generate<std::collections::HashSet<T>> for HashSet<M>
+where
+    M: Generate<T>,
+    T: Eq + Hash,
+{
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> Result<std::collections::HashSet<T>> {
+        self.generate_via_mutate(ctx, 1)
     }
 }
 

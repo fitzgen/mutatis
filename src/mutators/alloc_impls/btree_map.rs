@@ -112,6 +112,18 @@ where
     }
 }
 
+impl<KM, VM, K, V> Generate<alloc::collections::BTreeMap<K, V>> for BTreeMap<KM, VM>
+where
+    KM: Generate<K>,
+    VM: Generate<V> + Mutate<V>,
+    K: Ord,
+{
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> Result<alloc::collections::BTreeMap<K, V>> {
+        self.generate_via_mutate(ctx, 1)
+    }
+}
+
 impl<K, V> DefaultMutate for alloc::collections::BTreeMap<K, V>
 where
     K: DefaultMutate + Ord,

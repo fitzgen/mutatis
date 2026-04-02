@@ -86,6 +86,16 @@ where
     }
 }
 
+impl<M, T> Generate<alloc::collections::LinkedList<T>> for LinkedList<M>
+where
+    M: Generate<T> + Mutate<T>,
+{
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> Result<alloc::collections::LinkedList<T>> {
+        self.generate_via_mutate(ctx, 1)
+    }
+}
+
 impl<T> DefaultMutate for alloc::collections::LinkedList<T>
 where
     T: DefaultMutate,

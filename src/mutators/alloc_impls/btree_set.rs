@@ -102,6 +102,17 @@ where
     }
 }
 
+impl<M, T> Generate<alloc::collections::BTreeSet<T>> for BTreeSet<M>
+where
+    M: Generate<T>,
+    T: Ord,
+{
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> Result<alloc::collections::BTreeSet<T>> {
+        self.generate_via_mutate(ctx, 1)
+    }
+}
+
 impl<T> DefaultMutate for alloc::collections::BTreeSet<T>
 where
     T: DefaultMutate + Ord,
