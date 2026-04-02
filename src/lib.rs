@@ -801,8 +801,7 @@ where
     /// expressions than top-level factors, for example.
     ///
     /// ```
-    /// #![cfg(feature = "derive")]
-    ///
+    /// # #[cfg(feature = "derive")]
     /// # fn foo() -> mutatis::Result<()> {
     /// use mutatis::{
     ///     mutators as m, Candidates, Context, DefaultMutate, Generate, Mutate, MutateInRange,
@@ -902,6 +901,8 @@ where
     /// //     expr = Factor(Term(Var(Var('p'))))
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "derive"))]
+    /// # fn foo() -> mutatis::Result<()> { Ok(()) }
     /// # foo().unwrap()
     /// ```
     fn generate_via_mutate(&mut self, context: &mut Context, iters: usize) -> Result<T>

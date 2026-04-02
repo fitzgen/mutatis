@@ -3,6 +3,7 @@
 use super::*;
 
 mod binary_heap;
+mod boxed;
 mod btree_map;
 mod btree_set;
 mod linked_list;
@@ -10,6 +11,7 @@ mod vec;
 mod vec_deque;
 
 pub use binary_heap::*;
+pub use boxed::*;
 pub use btree_map::*;
 pub use btree_set::*;
 pub use linked_list::*;

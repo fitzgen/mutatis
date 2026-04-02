@@ -71,7 +71,6 @@ where
             })?;
         }
 
-
         // Swap two elements.
         if value.len() >= 2 {
             c.mutation(|ctx| {
