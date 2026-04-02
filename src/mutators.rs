@@ -21,8 +21,10 @@ mod alloc_impls;
 #[cfg(feature = "alloc")]
 pub use alloc_impls::*;
 
-// TODO: mod std;
-// TODO: pub use std::*;
+#[cfg(feature = "std")]
+mod std_impls;
+#[cfg(feature = "std")]
+pub use std_impls::*;
 
 /// A mutator that doesn't do anything.
 ///
@@ -69,6 +71,12 @@ impl<T> Mutate<T> for Nop<T> {
     }
 }
 
+impl<T: Default> Generate<T> for Nop<T> {
+    fn generate(&mut self, _ctx: &mut Context) -> Result<T> {
+        Ok(T::default())
+    }
+}
+
 /// A mutator constructed from a function.
 pub struct FromFn<F, T> {
     func: F,
@@ -78,7 +86,7 @@ pub struct FromFn<F, T> {
 /// Create a mutator from a function.
 ///
 /// The function is given a [`Context`] and an `&mut T` value, and must return a
-/// [`mutatis::Result<()>`].
+/// [`mutatis::Result<()>`][crate::Result].
 ///
 /// # Example
 ///
@@ -132,6 +140,15 @@ where
     }
 }
 
+impl<F, T: Default> Generate<T> for FromFn<F, T>
+where
+    F: FnMut(&mut Context, &mut T) -> Result<()>,
+{
+    fn generate(&mut self, ctx: &mut Context) -> Result<T> {
+        self.generate_via_mutate(ctx, 1)
+    }
+}
+
 /// A convenience function to get the default mutator for a type.
 ///
 /// This is equivalent to `<T as DefaultMutate>::DefaultMutate::default()` but a
@@ -148,7 +165,7 @@ where
 /// See the [`range`] function to create new `Range` mutator instances and for
 /// example usage.
 #[derive(Clone, Debug)]
-pub struct Range<M, T> {
+pub struct MRange<M, T> {
     mutator: M,
     range: ops::RangeInclusive<T>,
 }
@@ -160,7 +177,7 @@ pub struct Range<M, T> {
 /// ```
 /// use mutatis::{mutators as m, Mutate, Session};
 ///
-/// let mut mutator = m::range(111..=666);
+/// let mut mutator = m::mrange(111..=666);
 /// let mut session = Session::new();
 ///
 /// let mut value = 123;
@@ -169,21 +186,21 @@ pub struct Range<M, T> {
 /// assert!(value >= 111);
 /// assert!(value <= 666);
 /// ```
-pub fn range<T>(range: ops::RangeInclusive<T>) -> Range<T::DefaultMutate, T>
+pub fn mrange<T>(range: ops::RangeInclusive<T>) -> MRange<T::DefaultMutate, T>
 where
     T: DefaultMutate,
 {
     let mutator = default::<T>();
-    Range { mutator, range }
+    MRange { mutator, range }
 }
 
 /// Like [`range`] but uses the given `mutator` rather than the `T`'s default
 /// mutator.
-pub fn range_with<M, T>(range: ops::RangeInclusive<T>, mutator: M) -> Range<M, T> {
-    Range { mutator, range }
+pub fn range_with<M, T>(range: ops::RangeInclusive<T>, mutator: M) -> MRange<M, T> {
+    MRange { mutator, range }
 }
 
-impl<M, T> Mutate<T> for Range<M, T>
+impl<M, T> Mutate<T> for MRange<M, T>
 where
     M: MutateInRange<T>,
 {
@@ -193,7 +210,7 @@ where
     }
 }
 
-impl<M, T> Generate<T> for Range<M, T>
+impl<M, T> Generate<T> for MRange<M, T>
 where
     M: Generate<T> + MutateInRange<T>,
 {

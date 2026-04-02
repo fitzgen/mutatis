@@ -85,6 +85,7 @@ impl Session {
             context: Context {
                 rng: Rng::default(),
                 shrink: false,
+                generate_via_mutate_depth: 0,
             },
         }
     }
@@ -161,7 +162,7 @@ impl Session {
     /// let mut res = Ok(1234i32);
     ///
     /// // Create a custom mutator for `Result<i32, bool>` values.
-    /// let mut mutator = m::result(m::range(-10..=10), m::just(true));
+    /// let mut mutator = m::result(m::mrange(-10..=10), m::just(true));
     ///
     /// let mut session = Session::new().seed(0x1984);
     ///
@@ -181,7 +182,11 @@ impl Session {
     /// # }
     /// # foo().unwrap();
     /// ```
-    pub fn mutate_with<T>(&mut self, mutator: &mut impl Mutate<T>, value: &mut T) -> Result<()> {
+    pub fn mutate_with<T>(
+        &mut self,
+        mutator: &mut (impl Mutate<T> + ?Sized),
+        value: &mut T,
+    ) -> Result<()> {
         self.context.mutate_with(mutator, value)
     }
 
@@ -244,7 +249,7 @@ impl Session {
     ///
     /// // Create a mutator/generator for `Option<u32>` values, where the `u32`
     /// // is always in the range 10 to 20 inclusive.
-    /// let mut mutator = m::option(m::range(10..=20));
+    /// let mut mutator = m::option(m::mrange(10..=20));
     ///
     /// // Generate some values with that generation strategy.
     /// for _ in 0..5 {
@@ -283,6 +288,11 @@ impl Session {
 pub struct Context {
     rng: Rng,
     shrink: bool,
+
+    // Count of how many `generate_via_mutate` calls are active at a given
+    // moment in time. Allows us to limit the depth of these calls for recursive
+    // types so that we can avoid blowing the stack.
+    generate_via_mutate_depth: u32,
 }
 
 impl Context {
@@ -316,7 +326,7 @@ impl Context {
     #[inline]
     pub(crate) fn mutate_with<T>(
         &mut self,
-        mutator: &mut impl Mutate<T>,
+        mutator: &mut (impl Mutate<T> + ?Sized),
         value: &mut T,
     ) -> Result<()> {
         self.choose_and_apply_mutation(value, |c, value| mutator.mutate(c, value))
@@ -408,6 +418,22 @@ impl Context {
         range: &ops::RangeInclusive<T>,
     ) -> Result<()> {
         self.choose_and_apply_mutation(value, |c, value| mutator.mutate_in_range(c, value, range))
+    }
+
+    const MAX_DEPTH: u32 = 8;
+
+    pub(crate) fn with_generate_via_mutate_scope(
+        &mut self,
+        mut f: impl FnMut(&mut Self) -> Result<()>,
+    ) -> Result<()> {
+        self.generate_via_mutate_depth += 1;
+        let result = if !self.shrink() && self.generate_via_mutate_depth < Self::MAX_DEPTH {
+            f(self)
+        } else {
+            Ok(())
+        };
+        self.generate_via_mutate_depth -= 1;
+        result
     }
 }
 
@@ -686,8 +712,8 @@ where
     ///             // smaller values.
     ///             mutations.mutation(|ctx| {
     ///                 // We *can* mutate `self` and `pair` inside here.
-    ///                 let a = m::range(0..=pair.0).generate(ctx)?;
-    ///                 let b = m::range(0..=pair.1).generate(ctx)?;
+    ///                 let a = m::mrange(0..=pair.0).generate(ctx)?;
+    ///                 let b = m::mrange(0..=pair.1).generate(ctx)?;
     ///                 *pair = (a.min(b), a.max(b));
     ///                 Ok(())
     ///             })?;
@@ -732,6 +758,167 @@ where
 
     // Provided methods.
 
+    /// Generate a new value by mutating its default value `iters` times.
+    ///
+    /// The `iters` argument controls how many mutations are performed. More
+    /// mutations will lead to generated values that are generally more
+    /// different from the default value, but will take longer to generate. A
+    /// small number, even just `1`, is usually sufficient, because the fuzzer
+    /// will continue to mutate the input.
+    ///
+    /// This is a helper utility that allows you to implement `Generate<T>` "for
+    /// free" if you already have `T: Default` and `Mutate<T>` implementations.
+    ///
+    /// This is especially useful when implementing `Generate<T>` with a uniform
+    /// output distribution is otherwise difficult. For example, the natural way
+    /// to write a generator is often a decision tree, but keeping decision
+    /// trees balanced is difficult, which can easily bias the results
+    /// (especially when the choices are abstracted away behind helper
+    /// functions). Consider the following psuedocode:
+    ///
+    /// ```ignore
+    /// if ctx.gen_bool() {
+    ///     A
+    /// } else if ctx.gen_bool() {
+    ///     B
+    /// } else if ctx.gen_bool() {
+    ///     C
+    /// } else {
+    ///     D
+    /// }
+    /// ```
+    ///
+    /// We would ideally want to generate `A`, `B`, `C`, and `D` with equal
+    /// probability, but we actually end up generating `A` 50% of the time, `B`
+    /// 25% of the time, and `C` and `D` 12.5% of the time. Of course, this is
+    /// fairly obvious when we look at this code directly, but it may be
+    /// non-obvious in other cases due to code factoring.
+    ///
+    /// # Example
+    ///
+    /// Here we are generating random expressions, which contain factors, which
+    /// contain terms. We don't want to bias towards generating more top-level
+    /// expressions than top-level factors, for example.
+    ///
+    /// ```
+    /// # #[cfg(feature = "derive")]
+    /// # fn foo() -> mutatis::Result<()> {
+    /// use mutatis::{
+    ///     mutators as m, Candidates, Context, DefaultMutate, Generate, Mutate, MutateInRange,
+    ///     Result, Session,
+    /// };
+    ///
+    /// #[derive(Debug, Mutate)]
+    /// enum Expr {
+    ///     Add(Factor, Factor),
+    ///     Sub(Factor, Factor),
+    ///     Factor(Factor),
+    /// }
+    ///
+    /// impl Default for Expr {
+    ///     fn default() -> Self {
+    ///         Expr::Factor(Default::default())
+    ///     }
+    /// }
+    ///
+    /// impl Generate<Expr> for ExprMutator {
+    ///     fn generate(&mut self, context: &mut Context) -> Result<Expr> {
+    ///         self.generate_via_mutate(context, 2)
+    ///     }
+    /// }
+    ///
+    /// #[derive(Debug, Mutate)]
+    /// enum Factor {
+    ///     Mul(Term, Term),
+    ///     Div(Term, Term),
+    ///     Term(Term),
+    /// }
+    ///
+    /// impl Default for Factor {
+    ///     fn default() -> Self {
+    ///         Factor::Term(Default::default())
+    ///     }
+    /// }
+    ///
+    /// impl Generate<Factor> for FactorMutator {
+    ///     fn generate(&mut self, context: &mut Context) -> Result<Factor> {
+    ///         self.generate_via_mutate(context, 2)
+    ///     }
+    /// }
+    ///
+    /// #[derive(Debug, Mutate)]
+    /// enum Term {
+    ///     Var(Var),
+    ///     Num(u8),
+    /// }
+    ///
+    /// impl Default for Term {
+    ///     fn default() -> Self {
+    ///         Term::Num(Default::default())
+    ///     }
+    /// }
+    ///
+    /// impl Generate<Term> for TermMutator {
+    ///     fn generate(&mut self, context: &mut Context) -> Result<Term> {
+    ///         self.generate_via_mutate(context, 1)
+    ///     }
+    /// }
+    ///
+    /// #[derive(Default, Debug)]
+    /// struct Var(char);
+    ///
+    /// #[derive(Default)]
+    /// struct VarMutator;
+    ///
+    /// impl Mutate<Var> for VarMutator {
+    ///     fn mutate(&mut self, c: &mut Candidates<'_>, var: &mut Var) -> Result<()> {
+    ///         let range = 'a'..='z';
+    ///         m::char().mutate_in_range(c, &mut var.0, &range)
+    ///     }
+    /// }
+    ///
+    /// impl Generate<Var> for VarMutator {
+    ///     fn generate(&mut self, context: &mut Context) -> Result<Var> {
+    ///         self.generate_via_mutate(context, 1)
+    ///     }
+    /// }
+    ///
+    /// impl DefaultMutate for Var {
+    ///     type DefaultMutate = VarMutator;
+    /// }
+    ///
+    /// let mut session = Session::new();
+    /// for _ in 0..5 {
+    ///     let expr: Expr = session.generate()?;
+    ///     println!("expr = {expr:?}");
+    /// }
+    /// // Example output:
+    /// //
+    /// //     expr = Factor(Mul(Num(12), Var(Var('z'))))
+    /// //     expr = Sub(Div(Num(185), Var(Var('k'))), Div(Num(105), Var(Var('l'))))
+    /// //     expr = Factor(Mul(Num(26), Var(Var('y'))))
+    /// //     expr = Sub(Term(Num(121)), Mul(Var(Var('k')), Num(69)))
+    /// //     expr = Factor(Term(Var(Var('p'))))
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "derive"))]
+    /// # fn foo() -> mutatis::Result<()> { Ok(()) }
+    /// # foo().unwrap()
+    /// ```
+    fn generate_via_mutate(&mut self, context: &mut Context, iters: usize) -> Result<T>
+    where
+        T: Sized + Default,
+    {
+        let mut value = T::default();
+        context.with_generate_via_mutate_scope(|context| {
+            for _ in 0..iters {
+                context.mutate_with(self, &mut value)?;
+            }
+            Ok(())
+        })?;
+        Ok(value)
+    }
+
     /// Create a new mutator that performs either this mutation or the `other`
     /// mutation.
     ///
@@ -746,9 +933,9 @@ where
     /// // Either generate `-1`...
     /// let mut mutator = m::just(-1)
     ///     // ...or values in the range `0x40..=0x4f`...
-    ///     .or(m::range(0x40..=0x4f))
+    ///     .or(m::mrange(0x40..=0x4f))
     ///     // ...or values with just a single bit set.
-    ///     .or(m::range(0..=31).map(|_ctx, x| {
+    ///     .or(m::mrange(0..=31).map(|_ctx, x| {
     ///         *x = 1 << *x;
     ///         Ok(())
     ///     }));

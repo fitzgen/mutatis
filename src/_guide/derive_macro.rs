@@ -271,7 +271,7 @@ struct MyStruct {
 let mut session = Session::new();
 
 // Only an `x` mutator argument because `y` always uses the default mutator.
-let mut mutator = MyStructMutator::new(m::range(10..=19));
+let mut mutator = MyStructMutator::new(m::mrange(10..=19));
 
 let mut value = MyStruct::default();
 session.mutate_with(&mut mutator, &mut value)?;

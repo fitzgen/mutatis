@@ -2,10 +2,30 @@ use super::*;
 use crate::Result;
 use core::{cmp, ops};
 
+mod atomic;
+mod cell;
+mod duration;
+mod non_zero;
 mod option;
+mod phantom;
+mod ranges;
+mod ref_cell;
 mod result;
+mod reverse;
+mod unsafe_cell;
+mod wrapping;
+pub use atomic::*;
+pub use cell::*;
+pub use duration::*;
+pub use non_zero::*;
 pub use option::*;
+pub use phantom::*;
+pub use ranges::*;
+pub use ref_cell::*;
 pub use result::*;
+pub use reverse::*;
+pub use unsafe_cell::*;
+pub use wrapping::*;
 
 /// The default mutator for `bool` values.
 ///
@@ -41,6 +61,13 @@ impl Mutate<bool> for Bool {
             c.mutation(|_ctx| Ok(*value = !*value))?;
         }
         Ok(())
+    }
+}
+
+impl Generate<bool> for Bool {
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> Result<bool> {
+        Ok(ctx.rng().gen_bool())
     }
 }
 
@@ -232,7 +259,7 @@ impl Mutate<char> for Char {
             // of thing.
 
             let ch = |x| char::from_u32(x).unwrap_or_else(|| panic!("invalid char: {x:#x}"));
-            let mut char_range = |start, end| range(ch(start)..=ch(end)).mutate(c, value);
+            let mut char_range = |start, end| mrange(ch(start)..=ch(end)).mutate(c, value);
 
             // Non-control ASCII characters.
             char_range(0x20, 0x7E)?;
@@ -255,7 +282,7 @@ impl Mutate<char> for Char {
 
             // Catch all: any valid character, regardless of its plane, block,
             // or if it has been assigned or not.
-            c.mutation(|ctx| Ok(*value = ctx.rng().inner().gen()))?;
+            c.mutation(|ctx| Ok(*value = ctx.rng().inner().r#gen()))?;
 
             Ok(())
         }
@@ -269,7 +296,7 @@ impl DefaultMutate for char {
 impl Generate<char> for Char {
     #[inline]
     fn generate(&mut self, ctx: &mut Context) -> Result<char> {
-        Ok(ctx.rng().inner().gen())
+        Ok(ctx.rng().inner().r#gen())
     }
 }
 
@@ -301,6 +328,75 @@ impl MutateInRange<char> for Char {
             *value = ctx.rng().inner().gen_range(start..=end);
             Ok(())
         })
+    }
+}
+
+/// A mutator for ASCII `char` values.
+///
+/// See the [`char()`] function to create new instances and for example usage.
+#[derive(Clone, Debug, Default)]
+pub struct AsciiChar {
+    _private: (),
+}
+
+/// Create a mutator for ASCII `char` values.
+///
+/// # Example
+///
+/// ```
+/// # fn foo() -> mutatis::Result<()> {
+/// use mutatis::{mutators as m, Mutate, Session};
+///
+/// let mut mutator = m::ascii_char();
+/// let mut session = Session::new();
+///
+/// let mut c = 'a';
+/// for _ in 0..5 {
+///     session.mutate_with(&mut mutator, &mut c)?;
+///     println!("mutated c is {c}");
+/// }
+///
+/// // Example output:
+/// //
+/// //     mutated c is J
+/// //     mutated c is g
+/// //     mutated c is ~
+/// //     mutated c is L
+/// //     mutated c is v
+/// # Ok(())
+/// # }
+/// # foo().unwrap();
+/// ```
+pub fn ascii_char() -> AsciiChar {
+    AsciiChar { _private: () }
+}
+
+impl Mutate<char> for AsciiChar {
+    #[inline]
+    fn mutate(&mut self, c: &mut Candidates, value: &mut char) -> Result<()> {
+        if c.shrink() {
+            if *value != '\0' {
+                c.mutation(|ctx| {
+                    *value = ctx.rng().inner().gen_range('\0'..*value);
+                    Ok(())
+                })?;
+            }
+            Ok(())
+        } else {
+            let ch = |x| char::from_u32(x).unwrap_or_else(|| panic!("invalid char: {x:#x}"));
+            let mut char_range = |start, end| mrange(ch(start)..=ch(end)).mutate(c, value);
+
+            char_range(0x00, 0x7F)?;
+
+            Ok(())
+        }
+    }
+}
+
+impl Generate<char> for AsciiChar {
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> Result<char> {
+        self.generate_via_mutate(ctx, 1)
     }
 }
 
@@ -361,10 +457,10 @@ impl Mutate<f32> for F32 {
             special_finite(c, value)?;
 
             // Positives.
-            c.mutation(|ctx| Ok(*value = ctx.rng().inner().gen::<f32>() * f32::MAX))?;
+            c.mutation(|ctx| Ok(*value = ctx.rng().inner().r#gen::<f32>() * f32::MAX))?;
 
             // Negatives.
-            c.mutation(|ctx| Ok(*value = ctx.rng().inner().gen::<f32>() * f32::MIN))?;
+            c.mutation(|ctx| Ok(*value = ctx.rng().inner().r#gen::<f32>() * f32::MIN))?;
 
             Ok(())
         };
@@ -376,7 +472,7 @@ impl Mutate<f32> for F32 {
             if value.is_nan() || value.is_infinite() {
                 return finite(c, value);
             }
-            c.mutation(|ctx| Ok(*value *= ctx.rng().inner().gen::<f32>()))?;
+            c.mutation(|ctx| Ok(*value *= ctx.rng().inner().r#gen::<f32>()))?;
             Ok(())
         } else {
             finite(c, value)?;
@@ -385,6 +481,13 @@ impl Mutate<f32> for F32 {
             c.mutation(|_| Ok(*value = f32::NAN))?;
             Ok(())
         }
+    }
+}
+
+impl Generate<f32> for F32 {
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> Result<f32> {
+        Ok(ctx.rng().inner().r#gen::<f32>() * f32::MAX)
     }
 }
 
@@ -445,10 +548,10 @@ impl Mutate<f64> for F64 {
             special_finite(c, value)?;
 
             // Positives.
-            c.mutation(|ctx| Ok(*value = ctx.rng().inner().gen::<f64>() * f64::MAX))?;
+            c.mutation(|ctx| Ok(*value = ctx.rng().inner().r#gen::<f64>() * f64::MAX))?;
 
             // Negatives.
-            c.mutation(|ctx| Ok(*value = ctx.rng().inner().gen::<f64>() * f64::MIN))?;
+            c.mutation(|ctx| Ok(*value = ctx.rng().inner().r#gen::<f64>() * f64::MIN))?;
 
             Ok(())
         };
@@ -460,7 +563,7 @@ impl Mutate<f64> for F64 {
             if value.is_nan() || value.is_infinite() {
                 return finite(c, value);
             }
-            c.mutation(|ctx| Ok(*value *= ctx.rng().inner().gen::<f64>()))?;
+            c.mutation(|ctx| Ok(*value *= ctx.rng().inner().r#gen::<f64>()))?;
             Ok(())
         } else {
             finite(c, value)?;
@@ -472,9 +575,12 @@ impl Mutate<f64> for F64 {
     }
 }
 
-// TODO: str
-
-// TODO: slice
+impl Generate<f64> for F64 {
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> Result<f64> {
+        Ok(ctx.rng().inner().r#gen::<f64>() * f64::MAX)
+    }
+}
 
 macro_rules! tuples {
     ( $( $fn_name:ident -> $ty_name:ident ( $( $m:ident : $t:ident , )* ) ; )* ) => {
@@ -534,6 +640,19 @@ macro_rules! tuples {
                         self.$m.mutate(_c, $t)?;
                     )*
                     Ok(())
+                }
+            }
+
+            #[allow(non_snake_case)]
+            impl< $( $m , $t, )* > Generate<( $( $t , )* )> for $ty_name<$( $m , )*>
+            where
+                $(
+                    $m: Generate<$t>,
+                )*
+            {
+                #[inline]
+                fn generate(&mut self, _ctx: &mut Context) -> Result<( $( $t , )* )> {
+                    Ok(( $( self.$m.generate(_ctx)? , )* ))
                 }
             }
 
@@ -606,6 +725,13 @@ impl Mutate<()> for Unit {
     }
 }
 
+impl Generate<()> for Unit {
+    #[inline]
+    fn generate(&mut self, _ctx: &mut Context) -> Result<()> {
+        Ok(())
+    }
+}
+
 /// A mutator for fixed-size arrays.
 ///
 /// See the [`array()`] function to create a new `Array` mutator and for example
@@ -647,13 +773,24 @@ where
     }
 }
 
+impl<const N: usize, M, T> Generate<[T; N]> for Array<N, M>
+where
+    M: Generate<T>,
+{
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> Result<[T; N]> {
+        let mut arr: [core::mem::MaybeUninit<T>; N] =
+            core::array::from_fn(|_| core::mem::MaybeUninit::uninit());
+        for elem in arr.iter_mut() {
+            elem.write(self.mutator.generate(ctx)?);
+        }
+        Ok(unsafe { core::mem::transmute_copy(&arr) })
+    }
+}
+
 impl<const N: usize, T> DefaultMutate for [T; N]
 where
     T: DefaultMutate,
 {
     type DefaultMutate = Array<N, T::DefaultMutate>;
 }
-
-// TODO: cell, refcell
-
-// TODO: duration

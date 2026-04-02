@@ -22,6 +22,20 @@ where
     }
 }
 
+impl<M1, M2, T> Generate<T> for Or<M1, M2>
+where
+    M1: Generate<T>,
+    M2: Generate<T>,
+{
+    fn generate(&mut self, ctx: &mut Context) -> Result<T> {
+        if ctx.rng().gen_bool() {
+            self.left.generate(ctx)
+        } else {
+            self.right.generate(ctx)
+        }
+    }
+}
+
 /// A mutator combinator for mapping a function over the mutations produced by
 /// another mutator.
 ///
@@ -49,6 +63,18 @@ where
     }
 }
 
+impl<M, F, T> Generate<T> for Map<M, F>
+where
+    M: Generate<T>,
+    F: FnMut(&mut Context, &mut T) -> Result<()>,
+{
+    fn generate(&mut self, ctx: &mut Context) -> Result<T> {
+        let mut value = self.mutator.generate(ctx)?;
+        (self.f)(ctx, &mut value)?;
+        Ok(value)
+    }
+}
+
 /// A mutator combinator for projecting a value to a sub-value and applying a
 /// mutator to that sub-value.
 ///
@@ -67,6 +93,18 @@ where
     #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut T) -> Result<()> {
         self.mutator.mutate(c, (self.f)(value))
+    }
+}
+
+impl<M, F, T, U> Generate<T> for Proj<M, F>
+where
+    M: Mutate<U>,
+    F: FnMut(&mut T) -> &mut U,
+    T: Default,
+{
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> Result<T> {
+        self.generate_via_mutate(ctx, 1)
     }
 }
 
@@ -92,7 +130,7 @@ pub struct Just<T> {
 /// # fn foo() -> mutatis::Result<()> {
 /// use mutatis::{mutators as m, Mutate, Session};
 ///
-/// let mut mutator = m::just(42).or(m::range(1..=10));
+/// let mut mutator = m::just(42).or(m::mrange(1..=10));
 ///
 /// let mut x = 0;
 ///

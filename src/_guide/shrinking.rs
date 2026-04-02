@@ -88,7 +88,7 @@ impl Mutate<u32> for PowersOfTwo {
 
         c.mutation(|context| {
             // Choose a random `log2(value)` between 0 and `max_log2`, inclusive.
-            let log2 = m::range(0..=max_log2).generate(context)?;
+            let log2 = m::mrange(0..=max_log2).generate(context)?;
 
             // value = 2^log2(value) = 1 << log2(value)
             *value = 1 << log2;

@@ -59,6 +59,21 @@ where
     }
 }
 
+impl<M, N, T, E> Generate<core::result::Result<T, E>> for Result<M, N>
+where
+    M: Generate<T>,
+    N: Generate<E>,
+{
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> crate::Result<core::result::Result<T, E>> {
+        if ctx.rng().gen_bool() {
+            Ok(Ok(self.ok_mutator.generate(ctx)?))
+        } else {
+            Ok(Err(self.err_mutator.generate(ctx)?))
+        }
+    }
+}
+
 impl<T, E> DefaultMutate for core::result::Result<T, E>
 where
     T: DefaultMutate,
