@@ -71,6 +71,12 @@ impl<T> Mutate<T> for Nop<T> {
     }
 }
 
+impl<T: Default> Generate<T> for Nop<T> {
+    fn generate(&mut self, _ctx: &mut Context) -> Result<T> {
+        Ok(T::default())
+    }
+}
+
 /// A mutator constructed from a function.
 pub struct FromFn<F, T> {
     func: F,
@@ -131,6 +137,15 @@ where
 {
     fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut T) -> Result<()> {
         c.mutation(|ctx| (self.func)(ctx, value))
+    }
+}
+
+impl<F, T: Default> Generate<T> for FromFn<F, T>
+where
+    F: FnMut(&mut Context, &mut T) -> Result<()>,
+{
+    fn generate(&mut self, ctx: &mut Context) -> Result<T> {
+        self.generate_via_mutate(ctx, 1)
     }
 }
 

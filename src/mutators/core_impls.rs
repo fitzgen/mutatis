@@ -399,6 +399,13 @@ impl Mutate<f32> for F32 {
     }
 }
 
+impl Generate<f32> for F32 {
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> Result<f32> {
+        Ok(ctx.rng().inner().gen::<f32>() * f32::MAX)
+    }
+}
+
 /// A mutator for `f64` values.
 ///
 /// See the [`f64()`] function to create new instances and for example usage.
@@ -483,6 +490,13 @@ impl Mutate<f64> for F64 {
     }
 }
 
+impl Generate<f64> for F64 {
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> Result<f64> {
+        Ok(ctx.rng().inner().gen::<f64>() * f64::MAX)
+    }
+}
+
 // TODO: str
 
 // TODO: slice
@@ -545,6 +559,19 @@ macro_rules! tuples {
                         self.$m.mutate(_c, $t)?;
                     )*
                     Ok(())
+                }
+            }
+
+            #[allow(non_snake_case)]
+            impl< $( $m , $t, )* > Generate<( $( $t , )* )> for $ty_name<$( $m , )*>
+            where
+                $(
+                    $m: Generate<$t>,
+                )*
+            {
+                #[inline]
+                fn generate(&mut self, _ctx: &mut Context) -> Result<( $( $t , )* )> {
+                    Ok(( $( self.$m.generate(_ctx)? , )* ))
                 }
             }
 
@@ -617,6 +644,13 @@ impl Mutate<()> for Unit {
     }
 }
 
+impl Generate<()> for Unit {
+    #[inline]
+    fn generate(&mut self, _ctx: &mut Context) -> Result<()> {
+        Ok(())
+    }
+}
+
 /// A mutator for fixed-size arrays.
 ///
 /// See the [`array()`] function to create a new `Array` mutator and for example
@@ -655,6 +689,21 @@ where
             self.mutator.mutate(c, element)?;
         }
         Ok(())
+    }
+}
+
+impl<const N: usize, M, T> Generate<[T; N]> for Array<N, M>
+where
+    M: Generate<T>,
+{
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> Result<[T; N]> {
+        let mut arr: [core::mem::MaybeUninit<T>; N] =
+            core::array::from_fn(|_| core::mem::MaybeUninit::uninit());
+        for elem in arr.iter_mut() {
+            elem.write(self.mutator.generate(ctx)?);
+        }
+        Ok(unsafe { core::mem::transmute_copy(&arr) })
     }
 }
 
