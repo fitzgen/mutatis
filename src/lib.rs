@@ -85,6 +85,7 @@ impl Session {
             context: Context {
                 rng: Rng::default(),
                 shrink: false,
+                generate_via_mutate_depth: 0,
             },
         }
     }
@@ -287,6 +288,11 @@ impl Session {
 pub struct Context {
     rng: Rng,
     shrink: bool,
+
+    // Count of how many `generate_via_mutate` calls are active at a given
+    // moment in time. Allows us to limit the depth of these calls for recursive
+    // types so that we can avoid blowing the stack.
+    generate_via_mutate_depth: u32,
 }
 
 impl Context {
@@ -412,6 +418,22 @@ impl Context {
         range: &ops::RangeInclusive<T>,
     ) -> Result<()> {
         self.choose_and_apply_mutation(value, |c, value| mutator.mutate_in_range(c, value, range))
+    }
+
+    const MAX_DEPTH: u32 = 8;
+
+    pub(crate) fn with_generate_via_mutate_scope(
+        &mut self,
+        mut f: impl FnMut(&mut Self) -> Result<()>,
+    ) -> Result<()> {
+        self.generate_via_mutate_depth += 1;
+        let result = if !self.shrink() && self.generate_via_mutate_depth < Self::MAX_DEPTH {
+            f(self)
+        } else {
+            Ok(())
+        };
+        self.generate_via_mutate_depth -= 1;
+        result
     }
 }
 
@@ -738,15 +760,21 @@ where
 
     /// Generate a new value by mutating its default value `iters` times.
     ///
+    /// The `iters` argument controls how many mutations are performed. More
+    /// mutations will lead to generated values that are generally more
+    /// different from the default value, but will take longer to generate. A
+    /// small number, even just `1`, is usually sufficient, because the fuzzer
+    /// will continue to mutate the input.
+    ///
     /// This is a helper utility that allows you to implement `Generate<T>` "for
-    /// free" if you have `T: Default` and `Mutate<T>` implementations.
+    /// free" if you already have `T: Default` and `Mutate<T>` implementations.
     ///
     /// This is especially useful when implementing `Generate<T>` with a uniform
     /// output distribution is otherwise difficult. For example, the natural way
-    /// to write the generator is often a decision tree, but keeping decision
+    /// to write a generator is often a decision tree, but keeping decision
     /// trees balanced is difficult, which can easily bias the results
     /// (especially when the choices are abstracted away behind helper
-    /// functions). Consider the following code:
+    /// functions). Consider the following psuedocode:
     ///
     /// ```ignore
     /// if ctx.gen_bool() {
@@ -765,11 +793,6 @@ where
     /// 25% of the time, and `C` and `D` 12.5% of the time. Of course, this is
     /// fairly obvious when we look at this code directly, but it may be
     /// non-obvious in other cases due to code factoring.
-    ///
-    /// Avoid using this method if the type being generated is recursive (e.g. a
-    /// simple linked list) or risk probable stack overflows. This includes
-    /// implementations for container and collection types that are generic over
-    /// `T`, as that `T` could be `Option<Box<Self>>` for example.
     ///
     /// # Example
     ///
@@ -886,11 +909,12 @@ where
         T: Sized + Default,
     {
         let mut value = T::default();
-        if !context.shrink() {
+        context.with_generate_via_mutate_scope(|context| {
             for _ in 0..iters {
                 context.mutate_with(self, &mut value)?;
             }
-        }
+            Ok(())
+        })?;
         Ok(value)
     }
 
