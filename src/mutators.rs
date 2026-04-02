@@ -86,7 +86,7 @@ pub struct FromFn<F, T> {
 /// Create a mutator from a function.
 ///
 /// The function is given a [`Context`] and an `&mut T` value, and must return a
-/// [`mutatis::Result<()>`].
+/// [`mutatis::Result<()>`][crate::Result].
 ///
 /// # Example
 ///
