@@ -20,7 +20,7 @@ pub struct LinkedList<M> {
 ///
 /// let mut items: LinkedList<u32> = LinkedList::new();
 ///
-/// let mut mutator = m::linked_list(m::range(100..=199));
+/// let mut mutator = m::linked_list(m::mrange(100..=199));
 ///
 /// let mut session = Session::new();
 /// for _ in 0..5 {

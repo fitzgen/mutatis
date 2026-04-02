@@ -162,7 +162,7 @@ impl Session {
     /// let mut res = Ok(1234i32);
     ///
     /// // Create a custom mutator for `Result<i32, bool>` values.
-    /// let mut mutator = m::result(m::range(-10..=10), m::just(true));
+    /// let mut mutator = m::result(m::mrange(-10..=10), m::just(true));
     ///
     /// let mut session = Session::new().seed(0x1984);
     ///
@@ -249,7 +249,7 @@ impl Session {
     ///
     /// // Create a mutator/generator for `Option<u32>` values, where the `u32`
     /// // is always in the range 10 to 20 inclusive.
-    /// let mut mutator = m::option(m::range(10..=20));
+    /// let mut mutator = m::option(m::mrange(10..=20));
     ///
     /// // Generate some values with that generation strategy.
     /// for _ in 0..5 {
@@ -712,8 +712,8 @@ where
     ///             // smaller values.
     ///             mutations.mutation(|ctx| {
     ///                 // We *can* mutate `self` and `pair` inside here.
-    ///                 let a = m::range(0..=pair.0).generate(ctx)?;
-    ///                 let b = m::range(0..=pair.1).generate(ctx)?;
+    ///                 let a = m::mrange(0..=pair.0).generate(ctx)?;
+    ///                 let b = m::mrange(0..=pair.1).generate(ctx)?;
     ///                 *pair = (a.min(b), a.max(b));
     ///                 Ok(())
     ///             })?;
@@ -933,9 +933,9 @@ where
     /// // Either generate `-1`...
     /// let mut mutator = m::just(-1)
     ///     // ...or values in the range `0x40..=0x4f`...
-    ///     .or(m::range(0x40..=0x4f))
+    ///     .or(m::mrange(0x40..=0x4f))
     ///     // ...or values with just a single bit set.
-    ///     .or(m::range(0..=31).map(|_ctx, x| {
+    ///     .or(m::mrange(0..=31).map(|_ctx, x| {
     ///         *x = 1 << *x;
     ///         Ok(())
     ///     }));

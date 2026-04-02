@@ -18,7 +18,7 @@ pub struct Boxed<M> {
 ///
 /// let mut value: Box<u32> = Box::new(0);
 ///
-/// let mut mutator = m::boxed(m::range(100..=199));
+/// let mut mutator = m::boxed(m::mrange(100..=199));
 ///
 /// let mut session = Session::new();
 /// for _ in 0..5 {

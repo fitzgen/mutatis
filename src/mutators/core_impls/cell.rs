@@ -19,7 +19,7 @@ pub struct Cell<M> {
 ///
 /// let mut value = Cell::new(0u32);
 ///
-/// let mut mutator = m::cell(m::range(100..=199));
+/// let mut mutator = m::cell(m::mrange(100..=199));
 ///
 /// let mut session = Session::new();
 /// for _ in 0..5 {

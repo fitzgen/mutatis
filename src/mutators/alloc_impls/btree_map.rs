@@ -22,7 +22,7 @@ pub struct BTreeMap<KM, VM> {
 ///
 /// let mut items: BTreeMap<u8, u32> = BTreeMap::new();
 ///
-/// let mut mutator = m::btree_map(m::u8(), m::range(100..=199));
+/// let mut mutator = m::btree_map(m::u8(), m::mrange(100..=199));
 ///
 /// let mut session = Session::new();
 /// for _ in 0..5 {

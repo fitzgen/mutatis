@@ -20,7 +20,7 @@ pub struct RefCell<M> {
 ///
 /// let mut value = RefCell::new(0u32);
 ///
-/// let mut mutator = m::ref_cell(m::range(100..=199));
+/// let mut mutator = m::ref_cell(m::mrange(100..=199));
 ///
 /// let mut session = Session::new();
 /// for _ in 0..5 {

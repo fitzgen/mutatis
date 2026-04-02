@@ -18,7 +18,7 @@ pub struct Vec<M> {
 ///
 /// let mut items: Vec<u32> = vec![];
 ///
-/// let mut mutator = m::vec(m::range(100..=199));
+/// let mut mutator = m::vec(m::mrange(100..=199));
 ///
 /// let mut session = Session::new();
 /// for _ in 0..5 {

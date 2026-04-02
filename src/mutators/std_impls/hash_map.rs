@@ -22,7 +22,7 @@ pub struct HashMap<KM, VM> {
 ///
 /// let mut items: HashMap<u8, u32> = HashMap::new();
 ///
-/// let mut mutator = m::hash_map(m::u8(), m::range(100..=199));
+/// let mut mutator = m::hash_map(m::u8(), m::mrange(100..=199));
 ///
 /// let mut session = Session::new();
 /// for _ in 0..5 {

@@ -21,7 +21,7 @@ pub struct BTreeSet<M> {
 ///
 /// let mut items: BTreeSet<u32> = BTreeSet::new();
 ///
-/// let mut mutator = m::btree_set(m::range(100..=199));
+/// let mut mutator = m::btree_set(m::mrange(100..=199));
 ///
 /// let mut session = Session::new();
 /// for _ in 0..5 {

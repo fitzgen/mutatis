@@ -130,7 +130,7 @@ pub struct Just<T> {
 /// # fn foo() -> mutatis::Result<()> {
 /// use mutatis::{mutators as m, Mutate, Session};
 ///
-/// let mut mutator = m::just(42).or(m::range(1..=10));
+/// let mut mutator = m::just(42).or(m::mrange(1..=10));
 ///
 /// let mut x = 0;
 ///

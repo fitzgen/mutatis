@@ -20,7 +20,7 @@ pub struct BinaryHeap<M> {
 ///
 /// let mut items: BinaryHeap<u32> = BinaryHeap::new();
 ///
-/// let mut mutator = m::binary_heap(m::range(100..=199));
+/// let mut mutator = m::binary_heap(m::mrange(100..=199));
 ///
 /// let mut session = Session::new();
 /// for _ in 0..5 {

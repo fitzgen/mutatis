@@ -165,7 +165,7 @@ where
 /// See the [`range`] function to create new `Range` mutator instances and for
 /// example usage.
 #[derive(Clone, Debug)]
-pub struct Range<M, T> {
+pub struct MRange<M, T> {
     mutator: M,
     range: ops::RangeInclusive<T>,
 }
@@ -177,7 +177,7 @@ pub struct Range<M, T> {
 /// ```
 /// use mutatis::{mutators as m, Mutate, Session};
 ///
-/// let mut mutator = m::range(111..=666);
+/// let mut mutator = m::mrange(111..=666);
 /// let mut session = Session::new();
 ///
 /// let mut value = 123;
@@ -186,21 +186,21 @@ pub struct Range<M, T> {
 /// assert!(value >= 111);
 /// assert!(value <= 666);
 /// ```
-pub fn range<T>(range: ops::RangeInclusive<T>) -> Range<T::DefaultMutate, T>
+pub fn mrange<T>(range: ops::RangeInclusive<T>) -> MRange<T::DefaultMutate, T>
 where
     T: DefaultMutate,
 {
     let mutator = default::<T>();
-    Range { mutator, range }
+    MRange { mutator, range }
 }
 
 /// Like [`range`] but uses the given `mutator` rather than the `T`'s default
 /// mutator.
-pub fn range_with<M, T>(range: ops::RangeInclusive<T>, mutator: M) -> Range<M, T> {
-    Range { mutator, range }
+pub fn range_with<M, T>(range: ops::RangeInclusive<T>, mutator: M) -> MRange<M, T> {
+    MRange { mutator, range }
 }
 
-impl<M, T> Mutate<T> for Range<M, T>
+impl<M, T> Mutate<T> for MRange<M, T>
 where
     M: MutateInRange<T>,
 {
@@ -210,7 +210,7 @@ where
     }
 }
 
-impl<M, T> Generate<T> for Range<M, T>
+impl<M, T> Generate<T> for MRange<M, T>
 where
     M: Generate<T> + MutateInRange<T>,
 {

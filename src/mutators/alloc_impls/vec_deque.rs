@@ -20,7 +20,7 @@ pub struct VecDeque<M> {
 ///
 /// let mut items: VecDeque<u32> = VecDeque::new();
 ///
-/// let mut mutator = m::vec_deque(m::range(100..=199));
+/// let mut mutator = m::vec_deque(m::mrange(100..=199));
 ///
 /// let mut session = Session::new();
 /// for _ in 0..5 {

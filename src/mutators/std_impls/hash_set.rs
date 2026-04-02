@@ -21,7 +21,7 @@ pub struct HashSet<M> {
 ///
 /// let mut items: HashSet<Vec<u32>> = HashSet::new();
 ///
-/// let mut mutator = m::hash_set(m::vec(m::range(100..=199)));
+/// let mut mutator = m::hash_set(m::vec(m::mrange(100..=199)));
 ///
 /// let mut session = Session::new();
 /// for _ in 0..5 {
