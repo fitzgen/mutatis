@@ -181,7 +181,11 @@ impl Session {
     /// # }
     /// # foo().unwrap();
     /// ```
-    pub fn mutate_with<T>(&mut self, mutator: &mut impl Mutate<T>, value: &mut T) -> Result<()> {
+    pub fn mutate_with<T>(
+        &mut self,
+        mutator: &mut (impl Mutate<T> + ?Sized),
+        value: &mut T,
+    ) -> Result<()> {
         self.context.mutate_with(mutator, value)
     }
 
@@ -316,7 +320,7 @@ impl Context {
     #[inline]
     pub(crate) fn mutate_with<T>(
         &mut self,
-        mutator: &mut impl Mutate<T>,
+        mutator: &mut (impl Mutate<T> + ?Sized),
         value: &mut T,
     ) -> Result<()> {
         self.choose_and_apply_mutation(value, |c, value| mutator.mutate(c, value))
@@ -731,6 +735,164 @@ where
     fn mutate(&mut self, mutations: &mut Candidates<'_>, value: &mut T) -> Result<()>;
 
     // Provided methods.
+
+    /// Generate a new value by mutating its default value `iters` times.
+    ///
+    /// This is a helper utility that allows you to implement `Generate<T>` "for
+    /// free" if you have `T: Default` and `Mutate<T>` implementations.
+    ///
+    /// This is especially useful when implementing `Generate<T>` with a uniform
+    /// output distribution is otherwise difficult. For example, the natural way
+    /// to write the generator is often a decision tree, but keeping decision
+    /// trees balanced is difficult, which can easily bias the results
+    /// (especially when the choices are abstracted away behind helper
+    /// functions). Consider the following code:
+    ///
+    /// ```ignore
+    /// if ctx.gen_bool() {
+    ///     A
+    /// } else if ctx.gen_bool() {
+    ///     B
+    /// } else if ctx.gen_bool() {
+    ///     C
+    /// } else {
+    ///     D
+    /// }
+    /// ```
+    ///
+    /// We would ideally want to generate `A`, `B`, `C`, and `D` with equal
+    /// probability, but we actually end up generating `A` 50% of the time, `B`
+    /// 25% of the time, and `C` and `D` 12.5% of the time. Of course, this is
+    /// fairly obvious when we look at this code directly, but it may be
+    /// non-obvious in other cases due to code factoring.
+    ///
+    /// Avoid using this method if the type being generated is recursive (e.g. a
+    /// simple linked list) or risk probable stack overflows. This includes
+    /// implementations for container and collection types that are generic over
+    /// `T`, as that `T` could be `Option<Box<Self>>` for example.
+    ///
+    /// # Example
+    ///
+    /// Here we are generating random expressions, which contain factors, which
+    /// contain terms. We don't want to bias towards generating more top-level
+    /// expressions than top-level factors, for example.
+    ///
+    /// ```
+    /// #![cfg(feature = "derive")]
+    ///
+    /// # fn foo() -> mutatis::Result<()> {
+    /// use mutatis::{
+    ///     mutators as m, Candidates, Context, DefaultMutate, Generate, Mutate, MutateInRange,
+    ///     Result, Session,
+    /// };
+    ///
+    /// #[derive(Debug, Mutate)]
+    /// enum Expr {
+    ///     Add(Factor, Factor),
+    ///     Sub(Factor, Factor),
+    ///     Factor(Factor),
+    /// }
+    ///
+    /// impl Default for Expr {
+    ///     fn default() -> Self {
+    ///         Expr::Factor(Default::default())
+    ///     }
+    /// }
+    ///
+    /// impl Generate<Expr> for ExprMutator {
+    ///     fn generate(&mut self, context: &mut Context) -> Result<Expr> {
+    ///         self.generate_via_mutate(context, 2)
+    ///     }
+    /// }
+    ///
+    /// #[derive(Debug, Mutate)]
+    /// enum Factor {
+    ///     Mul(Term, Term),
+    ///     Div(Term, Term),
+    ///     Term(Term),
+    /// }
+    ///
+    /// impl Default for Factor {
+    ///     fn default() -> Self {
+    ///         Factor::Term(Default::default())
+    ///     }
+    /// }
+    ///
+    /// impl Generate<Factor> for FactorMutator {
+    ///     fn generate(&mut self, context: &mut Context) -> Result<Factor> {
+    ///         self.generate_via_mutate(context, 2)
+    ///     }
+    /// }
+    ///
+    /// #[derive(Debug, Mutate)]
+    /// enum Term {
+    ///     Var(Var),
+    ///     Num(u8),
+    /// }
+    ///
+    /// impl Default for Term {
+    ///     fn default() -> Self {
+    ///         Term::Num(Default::default())
+    ///     }
+    /// }
+    ///
+    /// impl Generate<Term> for TermMutator {
+    ///     fn generate(&mut self, context: &mut Context) -> Result<Term> {
+    ///         self.generate_via_mutate(context, 1)
+    ///     }
+    /// }
+    ///
+    /// #[derive(Default, Debug)]
+    /// struct Var(char);
+    ///
+    /// #[derive(Default)]
+    /// struct VarMutator;
+    ///
+    /// impl Mutate<Var> for VarMutator {
+    ///     fn mutate(&mut self, c: &mut Candidates<'_>, var: &mut Var) -> Result<()> {
+    ///         let range = 'a'..='z';
+    ///         m::char().mutate_in_range(c, &mut var.0, &range)
+    ///     }
+    /// }
+    ///
+    /// impl Generate<Var> for VarMutator {
+    ///     fn generate(&mut self, context: &mut Context) -> Result<Var> {
+    ///         self.generate_via_mutate(context, 1)
+    ///     }
+    /// }
+    ///
+    /// impl DefaultMutate for Var {
+    ///     type DefaultMutate = VarMutator;
+    /// }
+    ///
+    /// let mut session = Session::new();
+    /// for _ in 0..5 {
+    ///     let expr: Expr = session.generate()?;
+    ///     println!("expr = {expr:?}");
+    /// }
+    /// // Example output:
+    /// //
+    /// //     expr = Factor(Mul(Num(12), Var(Var('z'))))
+    /// //     expr = Sub(Div(Num(185), Var(Var('k'))), Div(Num(105), Var(Var('l'))))
+    /// //     expr = Factor(Mul(Num(26), Var(Var('y'))))
+    /// //     expr = Sub(Term(Num(121)), Mul(Var(Var('k')), Num(69)))
+    /// //     expr = Factor(Term(Var(Var('p'))))
+    /// # Ok(())
+    /// # }
+    /// # foo().unwrap()
+    /// ```
+    fn generate_via_mutate(&mut self, context: &mut Context, iters: usize) -> Result<T>
+    where
+        T: Sized + Default,
+    {
+        let mut value = T::default();
+        if !context.shrink() {
+            for _ in 0..iters {
+                context.mutate_with(self, &mut value)?;
+            }
+        }
+        Ok(value)
+    }
 
     /// Create a new mutator that performs either this mutation or the `other`
     /// mutation.
