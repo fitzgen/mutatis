@@ -36,7 +36,6 @@ pub struct PathBufMutator {
 /// //     value = "/home.csv/opt"
 /// //     value = "/home.csv"
 /// //     value = "/home.avi"
-/// panic!();
 /// # Ok(()) }
 /// # foo().unwrap();
 /// ```
