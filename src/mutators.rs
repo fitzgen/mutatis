@@ -21,8 +21,10 @@ mod alloc_impls;
 #[cfg(feature = "alloc")]
 pub use alloc_impls::*;
 
-// TODO: mod std;
-// TODO: pub use std::*;
+#[cfg(feature = "std")]
+mod std_impls;
+#[cfg(feature = "std")]
+pub use std_impls::*;
 
 /// A mutator that doesn't do anything.
 ///

@@ -1,25 +1,26 @@
 use super::*;
-use crate::error::ResultExt;
 
-/// The default mutator for `Vec<T>` values.
+/// The default mutator for `VecDeque<T>` values.
 ///
-/// See the [`vec()`] function to create new instances and for example usage.
+/// See the [`vec_deque()`] function to create new instances and for example
+/// usage.
 #[derive(Clone, Debug, Default)]
-pub struct Vec<M> {
+pub struct VecDeque<M> {
     mutator: M,
 }
 
-/// Create a new mutator for `Vec<T>` values.
+/// Create a new mutator for `VecDeque<T>` values.
 ///
 /// # Example
 ///
 /// ```
 /// # fn foo() -> mutatis::Result<()> {
 /// use mutatis::{mutators as m, Mutate, Session};
+/// use std::collections::VecDeque;
 ///
-/// let mut items: Vec<u32> = vec![];
+/// let mut items: VecDeque<u32> = VecDeque::new();
 ///
-/// let mut mutator = m::vec(m::range(100..=199));
+/// let mut mutator = m::vec_deque(m::range(100..=199));
 ///
 /// let mut session = Session::new();
 /// for _ in 0..5 {
@@ -29,24 +30,28 @@ pub struct Vec<M> {
 ///
 /// // Example output:
 /// //
-/// //     items = [168]
+/// //     items = [146]
+/// //     items = [194]
 /// //     items = []
-/// //     items = [142]
-/// //     items = [110]
-/// //     items = [114, 110]
+/// //     items = [124]
+/// //     items = [129, 124]
 /// # Ok(()) }
 /// # foo().unwrap();
 /// ```
-pub fn vec<M>(mutator: M) -> Vec<M> {
-    Vec { mutator }
+pub fn vec_deque<M>(mutator: M) -> VecDeque<M> {
+    VecDeque { mutator }
 }
 
-impl<M, T> Mutate<alloc::vec::Vec<T>> for Vec<M>
+impl<M, T> Mutate<alloc::collections::VecDeque<T>> for VecDeque<M>
 where
-    M: Generate<T>,
+    M: Generate<T> + Mutate<T>,
 {
     #[inline]
-    fn mutate(&mut self, c: &mut Candidates, value: &mut alloc::vec::Vec<T>) -> Result<()> {
+    fn mutate(
+        &mut self,
+        c: &mut Candidates,
+        value: &mut alloc::collections::VecDeque<T>,
+    ) -> Result<()> {
         // Add an element.
         if !c.shrink() {
             c.mutation(|ctx| {
@@ -67,7 +72,7 @@ where
         }
 
         // Mutate an existing element.
-        for x in value {
+        for x in value.iter_mut() {
             self.mutator.mutate(c, x)?;
         }
 
@@ -75,26 +80,10 @@ where
     }
 }
 
-impl<M, T> Generate<alloc::vec::Vec<T>> for Vec<M>
-where
-    M: Generate<T>,
-{
-    #[inline]
-    fn generate(&mut self, ctx: &mut Context) -> Result<alloc::vec::Vec<T>> {
-        let mut session = Session::new().seed(ctx.rng().gen_u64());
-
-        let mut v = alloc::vec::Vec::<T>::default();
-        for _ in 0..5 {
-            session.mutate_with(self, &mut v).ignore_exhausted()?;
-        }
-        Ok(v)
-    }
-}
-
-impl<T> DefaultMutate for alloc::vec::Vec<T>
+impl<T> DefaultMutate for alloc::collections::VecDeque<T>
 where
     T: DefaultMutate,
     T::DefaultMutate: Generate<T>,
 {
-    type DefaultMutate = Vec<T::DefaultMutate>;
+    type DefaultMutate = VecDeque<T::DefaultMutate>;
 }
