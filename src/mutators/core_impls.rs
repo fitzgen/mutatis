@@ -44,6 +44,13 @@ impl Mutate<bool> for Bool {
     }
 }
 
+impl Generate<bool> for Bool {
+    #[inline]
+    fn generate(&mut self, ctx: &mut Context) -> Result<bool> {
+        Ok(ctx.rng().gen_bool())
+    }
+}
+
 impl DefaultMutate for bool {
     type DefaultMutate = Bool;
 }

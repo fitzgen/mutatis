@@ -216,6 +216,20 @@ impl MutatorType {
                     }
                 }
             }
+            WhereClauseKind::MutateAndGenerateBounds => {
+                for f in &self.mutator_fields {
+                    let for_ty = &f.for_ty;
+                    if let Some(g) = f.generic.as_ref() {
+                        bounds.push(
+                            quote! { #g: mutatis::Mutate<#for_ty> + mutatis::Generate<#for_ty> },
+                        );
+                    } else {
+                        debug_assert_eq!(f.behavior, FieldBehavior::DefaultMutate);
+                        bounds.push(quote! { #for_ty: mutatis::DefaultMutate });
+                        bounds.push(quote! { <#for_ty as mutatis::DefaultMutate>::DefaultMutate: mutatis::Generate<#for_ty> });
+                    }
+                }
+            }
             WhereClauseKind::DefaultBounds => {
                 for f in &self.mutator_fields {
                     if let Some(g) = f.generic.as_ref() {
@@ -284,6 +298,7 @@ impl MutatorType {
 enum WhereClauseKind {
     NoMutateBounds,
     MutateBounds,
+    MutateAndGenerateBounds,
     DefaultBounds,
     DefaultMutateBounds,
 }
@@ -545,7 +560,13 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
     let impl_generics = mutator_ty.mutator_impl_generics();
 
     let ty_name = mutator_ty.ty_name_with_generics();
-    let where_clause = mutator_ty.where_clause(WhereClauseKind::MutateBounds);
+
+    let is_multi_variant_enum = matches!(&input.data, Data::Enum(data) if data.variants.len() > 1);
+    let where_clause = if is_multi_variant_enum {
+        mutator_ty.where_clause(WhereClauseKind::MutateAndGenerateBounds)
+    } else {
+        mutator_ty.where_clause(WhereClauseKind::MutateBounds)
+    };
 
     let mut fields_iter = mutator_ty.mutator_fields.iter();
     let mut make_mutation = |value| {
@@ -589,9 +610,8 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
         },
 
         Data::Enum(data) => {
-            // TODO: add support for changing from one enum variant to another.
-
-            let mut variants = vec![];
+            // Build the existing field-mutation match arms.
+            let mut field_mutation_arms = vec![];
             for v in data.variants.iter() {
                 let variant_ident = &v.ident;
                 match &v.fields {
@@ -611,7 +631,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                                 }
                             })
                             .collect::<Vec<_>>();
-                        variants.push(quote! {
+                        field_mutation_arms.push(quote! {
                             #ty_name::#variant_ident { #( #patterns )* } => {
                                 #( #mutates )*
                             }
@@ -635,7 +655,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                                 }
                             })
                             .collect::<Vec<_>>();
-                        variants.push(quote! {
+                        field_mutation_arms.push(quote! {
                             #ty_name::#variant_ident( #( #patterns )* ) => {
                                 #( #mutates )*
                             }
@@ -643,16 +663,124 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                     }
 
                     Fields::Unit => {
-                        variants.push(quote! {
+                        field_mutation_arms.push(quote! {
                             #ty_name::#variant_ident => {}
                         });
                     }
                 }
             }
 
+            // Build variant-switching mutations for enums with multiple
+            // variants.
+            let variant_switching = if data.variants.len() > 1 {
+                // Build a match to determine the current variant index.
+                let index_arms: Vec<_> = data
+                    .variants
+                    .iter()
+                    .enumerate()
+                    .map(|(v_idx, v)| {
+                        let variant_ident = &v.ident;
+                        match &v.fields {
+                            Fields::Named(_) => {
+                                quote! { #ty_name::#variant_ident { .. } => #v_idx, }
+                            }
+                            Fields::Unnamed(_) => {
+                                quote! { #ty_name::#variant_ident(..) => #v_idx, }
+                            }
+                            Fields::Unit => quote! { #ty_name::#variant_ident => #v_idx, },
+                        }
+                    })
+                    .collect();
+
+                // For each variant, build an expression that constructs a new
+                // instance of that variant. For non-ignored fields, use the
+                // mutator's `generate` method. For ignored fields, use
+                // `Default::default()`.
+                let mut variant_mutations = vec![];
+                let mut mutator_field_offset = 0usize;
+                for (v_idx, v) in data.variants.iter().enumerate() {
+                    let variant_ident = &v.ident;
+
+                    let construction = match &v.fields {
+                        Fields::Named(fields) => {
+                            let field_exprs: Vec<_> = fields
+                                .named
+                                .iter()
+                                .map(|f| {
+                                    let ident = &f.ident;
+                                    if let Some(_behavior) = FieldBehavior::for_field(f).unwrap() {
+                                        let mutator_ident =
+                                            &mutator_ty.mutator_fields[mutator_field_offset].ident;
+                                        mutator_field_offset += 1;
+                                        quote! { #ident: self.#mutator_ident.generate(ctx)? }
+                                    } else {
+                                        quote! { #ident: Default::default() }
+                                    }
+                                })
+                                .collect();
+                            quote! {
+                                *value = #ty_name::#variant_ident { #( #field_exprs ),* };
+                            }
+                        }
+                        Fields::Unnamed(fields) => {
+                            let field_exprs: Vec<_> = fields
+                                .unnamed
+                                .iter()
+                                .map(|f| {
+                                    if let Some(_behavior) = FieldBehavior::for_field(f).unwrap() {
+                                        let mutator_ident =
+                                            &mutator_ty.mutator_fields[mutator_field_offset].ident;
+                                        mutator_field_offset += 1;
+                                        quote! { self.#mutator_ident.generate(ctx)? }
+                                    } else {
+                                        quote! { Default::default() }
+                                    }
+                                })
+                                .collect();
+                            quote! {
+                                *value = #ty_name::#variant_ident( #( #field_exprs ),* );
+                            }
+                        }
+                        Fields::Unit => {
+                            quote! {
+                                *value = #ty_name::#variant_ident;
+                            }
+                        }
+                    };
+
+                    variant_mutations.push((v_idx, construction));
+                }
+
+                let num_variants = data.variants.len();
+                let switch_stmts: Vec<_> = variant_mutations
+                    .iter()
+                    .map(|(v_idx, construction)| {
+                        quote! {
+                            if _variant_index != #v_idx {
+                                mutations.mutation(|ctx| {
+                                    #construction
+                                    Ok(())
+                                })?;
+                            }
+                        }
+                    })
+                    .collect();
+
+                quote! {
+                    let _variant_index: usize = match value {
+                        #( #index_arms )*
+                    };
+                    let _ = #num_variants;
+                    #( #switch_stmts )*
+                }
+            } else {
+                quote! {}
+            };
+
             quote! {
+                #variant_switching
                 match value {
-                    #( #variants )*
+                    #( #field_mutation_arms )*
                 }
             }
         }

@@ -49,17 +49,45 @@ fn derive_on_enum() -> anyhow::Result<()> {
 
     let mut session = Session::new();
 
+    // Starting from Unit, we can mutate to another variant.
     let mut value = MyEnum::Unit;
-    session
-        .mutate(&mut value)
-        // TODO: support mutating from one enum variant to another
-        .ignore_exhausted()?;
+    session.mutate(&mut value)?;
 
     let mut value = MyEnum::Unnamed(0, false);
     session.mutate(&mut value)?;
 
     let mut value = MyEnum::Named { x: 0, y: false };
     session.mutate(&mut value)?;
+
+    Ok(())
+}
+
+#[test]
+fn derive_on_enum_variant_switching() -> anyhow::Result<()> {
+    #[derive(Debug, Mutate)]
+    enum MyEnum {
+        A,
+        B,
+        C(u8),
+    }
+
+    let mut session = Session::new();
+
+    // Starting from variant A, repeatedly mutate until we see a different
+    // variant, proving that variant switching works.
+    let mut saw_non_a = false;
+    for _ in 0..100 {
+        let mut value = MyEnum::A;
+        session.mutate(&mut value)?;
+        if !matches!(value, MyEnum::A) {
+            saw_non_a = true;
+            break;
+        }
+    }
+    assert!(
+        saw_non_a,
+        "expected variant switching to produce a non-A variant"
+    );
 
     Ok(())
 }
