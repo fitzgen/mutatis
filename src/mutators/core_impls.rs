@@ -403,6 +403,7 @@ impl Generate<char> for AsciiChar {
 /// A mutator for `f32` values.
 ///
 /// See the [`f32()`] function to create new instances and for example usage.
+#[derive(Default)]
 pub struct F32 {
     _private: (),
 }
@@ -491,9 +492,14 @@ impl Generate<f32> for F32 {
     }
 }
 
+impl DefaultMutate for f32 {
+    type DefaultMutate = F32;
+}
+
 /// A mutator for `f64` values.
 ///
 /// See the [`f64()`] function to create new instances and for example usage.
+#[derive(Default)]
 pub struct F64 {
     _private: (),
 }
@@ -580,6 +586,10 @@ impl Generate<f64> for F64 {
     fn generate(&mut self, ctx: &mut Context) -> Result<f64> {
         Ok(ctx.rng().inner().r#gen::<f64>() * f64::MAX)
     }
+}
+
+impl DefaultMutate for f64 {
+    type DefaultMutate = F64;
 }
 
 macro_rules! tuples {
@@ -730,6 +740,10 @@ impl Generate<()> for Unit {
     fn generate(&mut self, _ctx: &mut Context) -> Result<()> {
         Ok(())
     }
+}
+
+impl DefaultMutate for () {
+    type DefaultMutate = Unit;
 }
 
 /// A mutator for fixed-size arrays.
