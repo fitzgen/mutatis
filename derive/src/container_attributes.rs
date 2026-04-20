@@ -24,6 +24,14 @@ pub struct ContainerAttributes {
     /// #[mutatis(default_mutate = false)]
     /// ```
     pub default_mutate: Option<bool>,
+
+    /// An optional flag to specify whether the derived mutator should implement
+    /// `Generate` for the type or not. The default behavior is `true`.
+    ///
+    /// ```ignore
+    /// #[mutatis(generate = false)]
+    /// ```
+    pub generate: Option<bool>,
 }
 
 impl ContainerAttributes {
@@ -31,6 +39,7 @@ impl ContainerAttributes {
         let mut mutator_name = None;
         let mut mutator_doc = None;
         let mut default_mutate = None;
+        let mut generate = None;
 
         for attr in &derive_input.attrs {
             if !attr.path().is_ident(MUTATIS_ATTRIBUTE_NAME) {
@@ -102,6 +111,26 @@ impl ContainerAttributes {
                         path,
                         value:
                             Expr::Lit(ExprLit {
+                                lit: Lit::Bool(bool_lit),
+                                ..
+                            }),
+                        ..
+                    }) if path.is_ident("generate") => {
+                        if generate.is_some() {
+                            return Err(Error::new_spanned(
+                                attr,
+                                format!(
+                                    "invalid `{MUTATIS_ATTRIBUTE_NAME}` attribute: duplicate `generate`",
+                                ),
+                            ));
+                        }
+                        generate = Some(bool_lit.value);
+                    }
+
+                    Meta::NameValue(MetaNameValue {
+                        path,
+                        value:
+                            Expr::Lit(ExprLit {
                                 lit: Lit::Str(lit_str),
                                 ..
                             }),
@@ -124,6 +153,7 @@ impl ContainerAttributes {
             mutator_name,
             mutator_doc,
             default_mutate,
+            generate,
         })
     }
 }

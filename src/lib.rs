@@ -809,6 +809,7 @@ where
     /// };
     ///
     /// #[derive(Debug, Mutate)]
+    /// #[mutatis(generate = false)]
     /// enum Expr {
     ///     Add(Factor, Factor),
     ///     Sub(Factor, Factor),
@@ -828,6 +829,7 @@ where
     /// }
     ///
     /// #[derive(Debug, Mutate)]
+    /// #[mutatis(generate = false)]
     /// enum Factor {
     ///     Mul(Term, Term),
     ///     Div(Term, Term),
@@ -847,6 +849,7 @@ where
     /// }
     ///
     /// #[derive(Debug, Mutate)]
+    /// #[mutatis(generate = false)]
     /// enum Term {
     ///     Var(Var),
     ///     Num(u8),

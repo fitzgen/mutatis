@@ -28,6 +28,7 @@ fn expand_derive_mutator(input: DeriveInput) -> Result<TokenStream> {
     let mutator_ctor = gen_mutator_ctor(&mutator_ty)?;
     let mutator_impl = gen_mutator_impl(&input, &mutator_ty)?;
     let default_mutator_impl = gen_default_mutator_impl(&mutator_ty, &container_attrs)?;
+    let generate_impl = gen_generate_impl(&input, &mutator_ty, &container_attrs)?;
 
     Ok(quote! {
         #mutator_type_def
@@ -35,6 +36,7 @@ fn expand_derive_mutator(input: DeriveInput) -> Result<TokenStream> {
         #mutator_ctor
         #mutator_impl
         #default_mutator_impl
+        #generate_impl
     })
 }
 
@@ -623,7 +625,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                             .filter_map(|f| {
                                 let ident = &f.ident;
                                 if FieldBehavior::for_field(f).unwrap().is_some() {
-                                    patterns.push(quote! { #ident , });
+                                    patterns.push(quote! { ref mut #ident , });
                                     Some(make_mutation(quote! { #ident }))
                                 } else {
                                     patterns.push(quote! { #ident: _ , });
@@ -647,7 +649,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                             .filter_map(|(i, f)| {
                                 if FieldBehavior::for_field(f).unwrap().is_some() {
                                     let binding = Ident::new(&format!("field{}", i), f.span());
-                                    patterns.push(quote! { #binding , });
+                                    patterns.push(quote! { ref mut #binding , });
                                     Some(make_mutation(quote! { #binding }))
                                 } else {
                                     patterns.push(quote! { _ , });
@@ -779,7 +781,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
 
             quote! {
                 #variant_switching
-                match value {
+                match *value {
                     #( #field_mutation_arms )*
                 }
             }
@@ -801,7 +803,9 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
         ) -> mutatis::Result<()> {
             #mutation_body
 
-            // Silence unused-variable warnings if every field was marked `ignore`.
+            // Silence unused-variable warnings if every field was marked
+            // `ignore`. Allow unreachable for empty enums.
+            #[allow(unreachable_code)]
             let _ = (mutations, value);
 
             Ok(())
@@ -847,6 +851,156 @@ fn gen_default_mutator_impl(
             #where_clause
         {
             type DefaultMutate = #mutator_name;
+        }
+    })
+}
+
+fn gen_generate_impl(
+    input: &DeriveInput,
+    mutator_ty: &MutatorType,
+    container_attrs: &ContainerAttributes,
+) -> Result<TokenStream> {
+    let impl_generate = container_attrs.generate.unwrap_or(true);
+    if !impl_generate {
+        return Ok(quote! {});
+    }
+
+    let impl_generics = mutator_ty.mutator_impl_generics();
+    let ty_name = mutator_ty.ty_name_with_generics();
+    let mutator_name = &mutator_ty.mutator_name_with_generics(MutatorNameGenericsKind::Generics);
+    let where_clause = mutator_ty.where_clause(WhereClauseKind::MutateAndGenerateBounds);
+
+    let mut fields_iter = mutator_ty.mutator_fields.iter();
+    let mut next_field_generate = || -> TokenStream {
+        let mf = fields_iter.next().unwrap();
+        let ident = &mf.ident;
+        quote! { self.#ident.generate(cx)? }
+    };
+
+    // For struct literals, we can't include generic args (e.g. `Foo<T> { .. }`
+    // is invalid). Use the bare name and let Rust infer the type params.
+    let bare_ty_name = &mutator_ty.ty_name;
+
+    let generate_body = match &input.data {
+        Data::Struct(data) => match &data.fields {
+            Fields::Named(fields) => {
+                let field_exprs: Vec<_> = fields
+                    .named
+                    .iter()
+                    .map(|f| {
+                        let ident = &f.ident;
+                        if FieldBehavior::for_field(f).unwrap().is_some() {
+                            let expr = next_field_generate();
+                            quote! { #ident: #expr }
+                        } else {
+                            quote! { #ident: Default::default() }
+                        }
+                    })
+                    .collect();
+                quote! { Ok(#bare_ty_name { #( #field_exprs ),* }) }
+            }
+            Fields::Unnamed(fields) => {
+                let field_exprs: Vec<_> = fields
+                    .unnamed
+                    .iter()
+                    .map(|f| {
+                        if FieldBehavior::for_field(f).unwrap().is_some() {
+                            next_field_generate()
+                        } else {
+                            quote! { Default::default() }
+                        }
+                    })
+                    .collect();
+                quote! { Ok(#bare_ty_name( #( #field_exprs ),* )) }
+            }
+            Fields::Unit => {
+                quote! { Ok(#bare_ty_name) }
+            }
+        },
+
+        Data::Enum(data) => {
+            if data.variants.is_empty() {
+                quote! { unreachable!() }
+            } else {
+                let num_variants = data.variants.len();
+                let mut mutator_field_offset = 0usize;
+                let match_arms: Vec<_> = data
+                    .variants
+                    .iter()
+                    .enumerate()
+                    .map(|(v_idx, v)| {
+                        let variant_ident = &v.ident;
+                        let construction = match &v.fields {
+                            Fields::Named(fields) => {
+                                let field_exprs: Vec<_> = fields
+                                    .named
+                                    .iter()
+                                    .map(|f| {
+                                        let ident = &f.ident;
+                                        if FieldBehavior::for_field(f).unwrap().is_some() {
+                                            let mf =
+                                                &mutator_ty.mutator_fields[mutator_field_offset];
+                                            let mutator_ident = &mf.ident;
+                                            mutator_field_offset += 1;
+                                            quote! { #ident: self.#mutator_ident.generate(cx)? }
+                                        } else {
+                                            quote! { #ident: Default::default() }
+                                        }
+                                    })
+                                    .collect();
+                                quote! { #ty_name::#variant_ident { #( #field_exprs ),* } }
+                            }
+                            Fields::Unnamed(fields) => {
+                                let field_exprs: Vec<_> = fields
+                                    .unnamed
+                                    .iter()
+                                    .map(|f| {
+                                        if FieldBehavior::for_field(f).unwrap().is_some() {
+                                            let mf =
+                                                &mutator_ty.mutator_fields[mutator_field_offset];
+                                            let mutator_ident = &mf.ident;
+                                            mutator_field_offset += 1;
+                                            quote! { self.#mutator_ident.generate(cx)? }
+                                        } else {
+                                            quote! { Default::default() }
+                                        }
+                                    })
+                                    .collect();
+                                quote! { #ty_name::#variant_ident( #( #field_exprs ),* ) }
+                            }
+                            Fields::Unit => {
+                                quote! { #ty_name::#variant_ident }
+                            }
+                        };
+                        quote! { Some(#v_idx) => Ok(#construction), }
+                    })
+                    .collect();
+
+                quote! {
+                    match cx.rng().gen_index(#num_variants) {
+                        #( #match_arms )*
+                        _ => unreachable!(),
+                    }
+                }
+            }
+        }
+
+        Data::Union(_) => {
+            return Err(Error::new_spanned(
+                input,
+                "cannot `derive(Mutate)` on a union",
+            ))
+        }
+    };
+
+    Ok(quote! {
+        #[automatically_derived]
+        impl #impl_generics mutatis::Generate<#ty_name> for #mutator_name
+            #where_clause
+        {
+            fn generate(&mut self, cx: &mut mutatis::Context) -> mutatis::Result<#ty_name> {
+                #generate_body
+            }
         }
     })
 }

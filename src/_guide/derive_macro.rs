@@ -134,6 +134,32 @@ This is omitted if the `#[mutatis(default_mutate = false)]` attribute is
 present on the container. See the "Container Attributes" section below for
 more details.
 
+### A `Generate<Hero> for HeroMutator` implementation
+
+```rust
+# struct Hero { }
+# struct HeroMutator<MutatorT0, MutatorT1, MutatorT2> { _priv: (MutatorT0, MutatorT1, MutatorT2) }
+# trait Generate<X> {}
+impl<MutatorT0, MutatorT1, MutatorT2> Generate<Hero>
+    for HeroMutator<MutatorT0, MutatorT1, MutatorT2>
+where
+    MutatorT0: Generate<bool>,
+    MutatorT1: Generate<bool>,
+    MutatorT2: Generate<Option<u32>>,
+{
+    // ...
+}
+```
+
+For `struct`s, the generated `Generate` implementation calls each field
+mutator's `generate` method to produce the field values.
+
+For `enum`s, it randomly selects a variant and then calls each of that
+variant's field mutators' `generate` methods to produce the payloads.
+
+This is omitted if the `#[mutatis(generate = false)]` attribute is present on
+the container. See the "Container Attributes" section below for more details.
+
 ## Container Attributes
 
 The `#[derive(Mutate)]` macro supports the following attributes on `struct`s
@@ -206,6 +232,41 @@ pub struct Foo(u32);
 // than the default mutator for `u32`.
 impl DefaultMutate for Foo {
     type DefaultMutate = FooMutator<m::Just<u32>>;
+}
+# Ok(())
+# }
+# #[cfg(feature = "derive")] foo().unwrap();
+```
+
+### `#[mutatis(generate = false)]`
+
+Do not implement the `Generate` trait for the generated mutator type.
+
+This is useful if you want to provide your own `Generate` implementation, or
+if the type contains fields whose types cannot be generated from scratch
+(for example, fields with reference types that are marked `#[mutatis(ignore)]`).
+
+```rust
+# fn foo() -> mutatis::Result<()> {
+# #![cfg(feature = "derive")]
+use mutatis::{Context, Generate, Mutate};
+
+#[derive(Debug, Default, Mutate)]
+#[mutatis(generate = false)]
+pub struct Foo(u32);
+
+// Implement `Generate` ourselves.
+impl<M> Generate<Foo> for FooMutator<M>
+where
+    M: Mutate<u32>,
+{
+    fn generate(&mut self, cx: &mut Context) -> mutatis::Result<Foo> {
+        // Never generate values with the bottom bit set, for some reason.
+        let x = cx.rng().gen_u32();
+        let mask = !1;
+        let masked = x & mask;
+        Ok(Foo(masked))
+    }
 }
 # Ok(())
 # }

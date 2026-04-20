@@ -2,7 +2,7 @@
 
 use std::unreachable;
 
-use mutatis::{DefaultMutate, Mutate, Session, error::ResultExt, mutators as m};
+use mutatis::{error::ResultExt, mutators as m, DefaultMutate, Generate, Mutate, Session};
 
 #[test]
 fn derive_on_struct_with_named_fields() -> anyhow::Result<()> {
@@ -166,6 +166,7 @@ fn default_mutate_field() -> anyhow::Result<()> {
 #[test]
 fn derive_with_generic_parameters() -> anyhow::Result<()> {
     #[derive(Debug, Mutate)]
+    #[mutatis(generate = false)]
     struct MyGenericStruct<'a, 'b: 'a, const N: usize, T: Copy, U>
     where
         U: Default,
@@ -219,6 +220,7 @@ fn no_default_mutator() -> anyhow::Result<()> {
 #[test]
 fn derive_mutate_for_inst_and_vec_inst() -> anyhow::Result<()> {
     #[derive(Debug, Mutate)]
+    #[mutatis(generate = false)]
     enum Inst {
         Const(i32),
         Add,
@@ -276,5 +278,110 @@ fn derive_mutate_for_inst_and_vec_inst() -> anyhow::Result<()> {
     assert!(seen_sub);
     assert!(seen_mul);
     assert!(seen_div);
+    Ok(())
+}
+
+#[test]
+fn generate_struct_with_named_fields() -> anyhow::Result<()> {
+    #[derive(Debug, Mutate)]
+    struct NamedStruct {
+        x: u8,
+        y: bool,
+        z: u32,
+    }
+
+    let mut session = Session::new();
+    let value: NamedStruct = session.generate()?;
+    let _ = (value.x, value.y, value.z);
+    Ok(())
+}
+
+#[test]
+fn generate_struct_with_tuple_fields() -> anyhow::Result<()> {
+    #[derive(Debug, Mutate)]
+    struct TupleStruct(u8, bool, u32);
+
+    let mut session = Session::new();
+    let value: TupleStruct = session.generate()?;
+    let _ = (value.0, value.1, value.2);
+    Ok(())
+}
+
+#[test]
+fn generate_unit_struct() -> anyhow::Result<()> {
+    #[derive(Debug, Mutate)]
+    struct UnitStruct;
+
+    let mut session = Session::new();
+    let _value: UnitStruct = session.generate()?;
+    Ok(())
+}
+
+#[test]
+fn generate_enum_no_variants() -> anyhow::Result<()> {
+    #[derive(Debug, Mutate)]
+    #[mutatis(default_mutate = false)]
+    enum EmptyEnum {}
+
+    // Cannot generate a value of an empty enum, so just verify the type compiles.
+    let _ = core::mem::size_of::<EmptyEnum>();
+    Ok(())
+}
+
+#[test]
+fn generate_enum_mixed_variants() -> anyhow::Result<()> {
+    #[derive(Debug, Mutate)]
+    enum MixedEnum {
+        Unit,
+        Tuple(u8, bool),
+        Named { x: u32, y: bool },
+    }
+
+    let mut session = Session::new();
+
+    let mut saw_unit = false;
+    let mut saw_tuple = false;
+    let mut saw_named = false;
+
+    for _ in 0..200 {
+        let value: MixedEnum = session.generate()?;
+        match value {
+            MixedEnum::Unit => saw_unit = true,
+            MixedEnum::Tuple(_, _) => saw_tuple = true,
+            MixedEnum::Named { .. } => saw_named = true,
+        }
+        if saw_unit && saw_tuple && saw_named {
+            break;
+        }
+    }
+
+    assert!(saw_unit, "expected to generate Unit variant");
+    assert!(saw_tuple, "expected to generate Tuple variant");
+    assert!(saw_named, "expected to generate Named variant");
+    Ok(())
+}
+
+#[test]
+fn generate_false_attribute() -> anyhow::Result<()> {
+    #[derive(Debug, Mutate)]
+    #[mutatis(generate = false)]
+    struct NoGenerate {
+        x: u8,
+    }
+
+    // Manually implement Generate to verify the derive didn't emit one.
+    impl<M> Generate<NoGenerate> for NoGenerateMutator<M>
+    where
+        M: Generate<u8>,
+    {
+        fn generate(&mut self, cx: &mut mutatis::Context) -> mutatis::Result<NoGenerate> {
+            Ok(NoGenerate {
+                x: self.x.generate(cx)?,
+            })
+        }
+    }
+
+    let mut session = Session::new();
+    let _value: NoGenerate = session.generate()?;
     Ok(())
 }
