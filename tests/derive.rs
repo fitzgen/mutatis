@@ -1,6 +1,8 @@
 #![cfg(all(feature = "derive", feature = "std"))]
 
-use mutatis::{error::ResultExt, mutators as m, DefaultMutate, Mutate, Session};
+use std::unreachable;
+
+use mutatis::{DefaultMutate, Mutate, Session, error::ResultExt, mutators as m};
 
 #[test]
 fn derive_on_struct_with_named_fields() -> anyhow::Result<()> {
@@ -211,5 +213,68 @@ fn no_default_mutator() -> anyhow::Result<()> {
     let mut mutator = MyStructMutator::new(m::u64());
     let mut value = MyStruct { x: 0 };
     session.mutate_with(&mut mutator, &mut value)?;
+    Ok(())
+}
+
+#[test]
+fn derive_mutate_for_inst_and_vec_inst() -> anyhow::Result<()> {
+    #[derive(Debug, Mutate)]
+    enum Inst {
+        Const(i32),
+        Add,
+        Sub,
+        Mul,
+        Div,
+    }
+
+    impl<M> mutatis::Generate<Inst> for InstMutator<M>
+    where
+        M: mutatis::Generate<i32>,
+    {
+        fn generate(&mut self, cx: &mut mutatis::Context) -> mutatis::Result<Inst> {
+            Ok(match cx.rng().gen_index(5).unwrap() {
+                0 => Inst::Const(self.const0.generate(cx)?),
+                1 => Inst::Add,
+                2 => Inst::Sub,
+                3 => Inst::Mul,
+                4 => Inst::Div,
+                _ => unreachable!(),
+            })
+        }
+    }
+
+    #[derive(Debug, Mutate)]
+    struct Insts {
+        insts: Vec<Inst>,
+    }
+
+    let mut session = Session::new();
+    let mut value = Insts { insts: vec![] };
+
+    let mut seen_const = false;
+    let mut seen_add = false;
+    let mut seen_sub = false;
+    let mut seen_mul = false;
+    let mut seen_div = false;
+    for _ in 0..1000 {
+        session.mutate(&mut value)?;
+        for inst in &value.insts {
+            match inst {
+                Inst::Const(_) => seen_const = true,
+                Inst::Add => seen_add = true,
+                Inst::Sub => seen_sub = true,
+                Inst::Mul => seen_mul = true,
+                Inst::Div => seen_div = true,
+            }
+        }
+        if seen_const && seen_add && seen_sub && seen_mul && seen_div {
+            break;
+        }
+    }
+    assert!(seen_const);
+    assert!(seen_add);
+    assert!(seen_sub);
+    assert!(seen_mul);
+    assert!(seen_div);
     Ok(())
 }
