@@ -1100,6 +1100,296 @@ where
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // With a decision-tree approach like:
+    //   if random() { A } else if random() { B } else if random() { C } else { D }
+    // we'd get A=50%, B=25%, C=12.5%, D=12.5%.
+    // Mutatis gathers all candidates first and picks uniformly, so each should be ~25%.
+    //
+    // Expected count per variant is ITERS/4 = 2500. Tolerance of 5% (500 counts)
+    // is >11 standard deviations from the mean for a correct uniform distribution,
+    // so false failures are essentially impossible.
+    const ITERS: usize = 10_000;
+    const EXPECTED: usize = ITERS / 4;
+    const TOLERANCE: usize = ITERS / 20;
+
+    fn assert_uniform(counts: &[usize; 4], label: &str) {
+        for (i, &count) in counts.iter().enumerate() {
+            assert!(
+                count.abs_diff(EXPECTED) <= TOLERANCE,
+                "{label} {i} was chosen {count} times (expected ~{EXPECTED}, \
+                 tolerance ±{TOLERANCE}); mutation distribution is not uniform",
+            );
+        }
+    }
+
+    // ---- Flat enum ----
+
+    #[derive(Clone, Copy)]
+    enum FourVariants {
+        A,
+        B,
+        C,
+        D,
+    }
+
+    struct FourVariantsMutator;
+
+    impl Mutate<FourVariants> for FourVariantsMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut FourVariants) -> Result<()> {
+            c.mutation(|_| { *value = FourVariants::A; Ok(()) })?;
+            c.mutation(|_| { *value = FourVariants::B; Ok(()) })?;
+            c.mutation(|_| { *value = FourVariants::C; Ok(()) })?;
+            c.mutation(|_| { *value = FourVariants::D; Ok(()) })?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn enum_mutation_is_uniform() {
+        let mut session = Session::new();
+        let mut value = FourVariants::A;
+        let mut counts = [0usize; 4];
+        let mut mutator = FourVariantsMutator;
+
+        for _ in 0..ITERS {
+            session.mutate_with(&mut mutator, &mut value).unwrap();
+            counts[match value {
+                FourVariants::A => 0,
+                FourVariants::B => 1,
+                FourVariants::C => 2,
+                FourVariants::D => 3,
+            }] += 1;
+        }
+
+        assert_uniform(&counts, "variant");
+    }
+
+    // ---- Flat struct with four bool fields ----
+
+    struct FourFields {
+        a: bool,
+        b: bool,
+        c: bool,
+        d: bool,
+    }
+
+    #[derive(Default)]
+    struct FourFieldsMutator {
+        a: mutators::Bool,
+        b: mutators::Bool,
+        c: mutators::Bool,
+        d: mutators::Bool,
+    }
+
+    impl Mutate<FourFields> for FourFieldsMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut FourFields) -> Result<()> {
+            self.a.mutate(c, &mut value.a)?;
+            self.b.mutate(c, &mut value.b)?;
+            self.c.mutate(c, &mut value.c)?;
+            self.d.mutate(c, &mut value.d)?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn struct_mutation_is_uniform() {
+        let mut session = Session::new();
+        let mut mutator = FourFieldsMutator::default();
+        let mut counts = [0usize; 4];
+
+        for _ in 0..ITERS {
+            let mut value = FourFields { a: false, b: false, c: false, d: false };
+            session.mutate_with(&mut mutator, &mut value).unwrap();
+            if value.a { counts[0] += 1; }
+            if value.b { counts[1] += 1; }
+            if value.c { counts[2] += 1; }
+            if value.d { counts[3] += 1; }
+        }
+
+        assert_uniform(&counts, "field");
+    }
+
+    // ---- Nested structs: Abcd { a, bcd: Bcd { b, cd: Cd { c, d } } } ----
+
+    struct NestedAbcd {
+        a: bool,
+        bcd: NestedBcd,
+    }
+
+    struct NestedBcd {
+        b: bool,
+        cd: NestedCd,
+    }
+
+    struct NestedCd {
+        c: bool,
+        d: bool,
+    }
+
+    #[derive(Default)]
+    struct NestedCdMutator {
+        c: mutators::Bool,
+        d: mutators::Bool,
+    }
+
+    #[derive(Default)]
+    struct NestedBcdMutator {
+        b: mutators::Bool,
+        cd: NestedCdMutator,
+    }
+
+    #[derive(Default)]
+    struct NestedAbcdMutator {
+        a: mutators::Bool,
+        bcd: NestedBcdMutator,
+    }
+
+    impl Mutate<NestedCd> for NestedCdMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut NestedCd) -> Result<()> {
+            self.c.mutate(c, &mut value.c)?;
+            self.d.mutate(c, &mut value.d)?;
+            Ok(())
+        }
+    }
+
+    impl Mutate<NestedBcd> for NestedBcdMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut NestedBcd) -> Result<()> {
+            self.b.mutate(c, &mut value.b)?;
+            self.cd.mutate(c, &mut value.cd)?;
+            Ok(())
+        }
+    }
+
+    impl Mutate<NestedAbcd> for NestedAbcdMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut NestedAbcd) -> Result<()> {
+            self.a.mutate(c, &mut value.a)?;
+            self.bcd.mutate(c, &mut value.bcd)?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn nested_struct_mutation_is_uniform() {
+        let mut session = Session::new();
+        let mut mutator = NestedAbcdMutator::default();
+        let mut counts = [0usize; 4];
+
+        for _ in 0..ITERS {
+            let mut value = NestedAbcd {
+                a: false,
+                bcd: NestedBcd {
+                    b: false,
+                    cd: NestedCd { c: false, d: false },
+                },
+            };
+            session.mutate_with(&mut mutator, &mut value).unwrap();
+            if value.a { counts[0] += 1; }
+            if value.bcd.b { counts[1] += 1; }
+            if value.bcd.cd.c { counts[2] += 1; }
+            if value.bcd.cd.d { counts[3] += 1; }
+        }
+
+        assert_uniform(&counts, "field");
+    }
+
+    // ---- Nested enums: Abcd { A, Bcd(Bcd { B, Cd(Cd { C, D }) }) } ----
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum EnumAbcd {
+        A,
+        Bcd(EnumBcd),
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum EnumBcd {
+        B,
+        Cd(EnumCd),
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum EnumCd {
+        C,
+        D,
+    }
+
+    struct EnumCdMutator;
+
+    impl Mutate<EnumCd> for EnumCdMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut EnumCd) -> Result<()> {
+            c.mutation(|_| { *value = EnumCd::C; Ok(()) })?;
+            c.mutation(|_| { *value = EnumCd::D; Ok(()) })?;
+            Ok(())
+        }
+    }
+
+    struct EnumBcdMutator {
+        cd: EnumCdMutator,
+    }
+
+    impl Mutate<EnumBcd> for EnumBcdMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut EnumBcd) -> Result<()> {
+            c.mutation(|_| { *value = EnumBcd::B; Ok(()) })?;
+            match value {
+                EnumBcd::B => {
+                    c.mutation(|_| { *value = EnumBcd::Cd(EnumCd::C); Ok(()) })?;
+                    c.mutation(|_| { *value = EnumBcd::Cd(EnumCd::D); Ok(()) })?;
+                }
+                EnumBcd::Cd(cd) => {
+                    self.cd.mutate(c, cd)?;
+                }
+            }
+            Ok(())
+        }
+    }
+
+    struct EnumAbcdMutator {
+        bcd: EnumBcdMutator,
+    }
+
+    impl Mutate<EnumAbcd> for EnumAbcdMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut EnumAbcd) -> Result<()> {
+            c.mutation(|_| { *value = EnumAbcd::A; Ok(()) })?;
+            match value {
+                EnumAbcd::A => {
+                    c.mutation(|_| { *value = EnumAbcd::Bcd(EnumBcd::B); Ok(()) })?;
+                    c.mutation(|_| { *value = EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::C)); Ok(()) })?;
+                    c.mutation(|_| { *value = EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::D)); Ok(()) })?;
+                }
+                EnumAbcd::Bcd(bcd) => {
+                    self.bcd.mutate(c, bcd)?;
+                }
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn nested_enum_mutation_is_uniform() {
+        let mut session = Session::new();
+        let mut mutator = EnumAbcdMutator {
+            bcd: EnumBcdMutator { cd: EnumCdMutator },
+        };
+        let mut counts = [0usize; 4];
+
+        for _ in 0..ITERS {
+            let mut value = EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::D));
+            session.mutate_with(&mut mutator, &mut value).unwrap();
+            counts[match value {
+                EnumAbcd::A => 0,
+                EnumAbcd::Bcd(EnumBcd::B) => 1,
+                EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::C)) => 2,
+                EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::D)) => 3,
+            }] += 1;
+        }
+
+        assert_uniform(&counts, "variant");
+    }
+}
+
 fn _static_assert_object_safety(
     _: &dyn Mutate<u8>,
     _: &dyn Generate<u8>,
