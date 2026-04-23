@@ -342,15 +342,12 @@ impl Context {
         // Count how many mutations we *could* perform.
         let mut candidates = Candidates {
             context: self,
-            phase: Phase::Count(0),
+            phase: Phase::counting(),
             applied_mutation: false,
         };
         mutate_impl(&mut candidates, value)?;
 
-        let count = match candidates.phase {
-            Phase::Count(count) => usize::try_from(count).unwrap(),
-            Phase::Mutate { .. } => unreachable!(),
-        };
+        let count = usize::try_from(candidates.phase.current).unwrap();
         log::trace!("counted {count} mutations");
 
         if count == 0 {
@@ -364,10 +361,7 @@ impl Context {
         debug_assert!(target < count);
 
         // Perform the chosen target mutation.
-        candidates.phase = Phase::Mutate {
-            current: 0,
-            target: u32::try_from(target).unwrap(),
-        };
+        candidates.phase = Phase::mutate(u32::try_from(target).unwrap());
         match mutate_impl(&mut candidates, value) {
             Err(e) if e.is_early_exit() => {
                 log::trace!("mutation applied successfully");
@@ -396,10 +390,7 @@ impl Context {
                 )
             }
             Ok(()) => {
-                let current = match candidates.phase {
-                    Phase::Mutate { current, .. } => current,
-                    _ => unreachable!(),
-                };
+                let current = candidates.phase.current;
                 panic!(
                     "Nondeterministic mutator implementation: did not enumerate the \
                      same set of mutations when given the same value! Counted {count} \
@@ -437,10 +428,34 @@ impl Context {
     }
 }
 
-#[derive(Clone, Copy)]
-enum Phase {
-    Count(u32),
-    Mutate { current: u32, target: u32 },
+// Logically this is
+//
+//     enum Phase {
+//         Count(u32),
+//         Mutate { current: u32, target: u32 },
+//     }
+//
+// but we avoid the `enum` for performance.
+#[derive(Clone)]
+struct Phase {
+    current: u32,
+
+    // `u32::MAX` means we're in counting mode, and do not have target mutation
+    // to apply.
+    target: u32,
+}
+
+impl Phase {
+    fn counting() -> Self {
+        Phase {
+            current: 0,
+            target: u32::MAX,
+        }
+    }
+
+    fn mutate(target: u32) -> Self {
+        Phase { current: 0, target }
+    }
 }
 
 /// The set of mutations that can be applied to a value.
@@ -469,26 +484,14 @@ impl<'a> Candidates<'a> {
     /// information on this method's use.
     #[inline]
     pub fn mutation(&mut self, mut f: impl FnMut(&mut Context) -> Result<()>) -> Result<()> {
-        match &mut self.phase {
-            Phase::Count(count) => {
-                *count += 1;
-                Ok(())
-            }
-            Phase::Mutate { current, target } => {
-                assert!(
-                    *current <= *target,
-                    "{current} <= {target}; did you forget to `?`-propagate the \
-                     result of a `Candidates::mutation` call?",
-                );
-                if *current == *target {
-                    self.applied_mutation = true;
-                    f(&mut self.context)?;
-                    Err(Error::early_exit())
-                } else {
-                    *current += 1;
-                    Ok(())
-                }
-            }
+        let idx = self.phase.current;
+        self.phase.current = idx + 1;
+        if idx == self.phase.target {
+            self.applied_mutation = true;
+            f(&mut self.context)?;
+            Err(Error::early_exit())
+        } else {
+            Ok(())
         }
     }
 
@@ -1140,10 +1143,22 @@ mod tests {
 
     impl Mutate<FourVariants> for FourVariantsMutator {
         fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut FourVariants) -> Result<()> {
-            c.mutation(|_| { *value = FourVariants::A; Ok(()) })?;
-            c.mutation(|_| { *value = FourVariants::B; Ok(()) })?;
-            c.mutation(|_| { *value = FourVariants::C; Ok(()) })?;
-            c.mutation(|_| { *value = FourVariants::D; Ok(()) })?;
+            c.mutation(|_| {
+                *value = FourVariants::A;
+                Ok(())
+            })?;
+            c.mutation(|_| {
+                *value = FourVariants::B;
+                Ok(())
+            })?;
+            c.mutation(|_| {
+                *value = FourVariants::C;
+                Ok(())
+            })?;
+            c.mutation(|_| {
+                *value = FourVariants::D;
+                Ok(())
+            })?;
             Ok(())
         }
     }
@@ -1202,12 +1217,25 @@ mod tests {
         let mut counts = [0usize; 4];
 
         for _ in 0..ITERS {
-            let mut value = FourFields { a: false, b: false, c: false, d: false };
+            let mut value = FourFields {
+                a: false,
+                b: false,
+                c: false,
+                d: false,
+            };
             session.mutate_with(&mut mutator, &mut value).unwrap();
-            if value.a { counts[0] += 1; }
-            if value.b { counts[1] += 1; }
-            if value.c { counts[2] += 1; }
-            if value.d { counts[3] += 1; }
+            if value.a {
+                counts[0] += 1;
+            }
+            if value.b {
+                counts[1] += 1;
+            }
+            if value.c {
+                counts[2] += 1;
+            }
+            if value.d {
+                counts[3] += 1;
+            }
         }
 
         assert_uniform(&counts, "field");
@@ -1287,10 +1315,18 @@ mod tests {
                 },
             };
             session.mutate_with(&mut mutator, &mut value).unwrap();
-            if value.a { counts[0] += 1; }
-            if value.bcd.b { counts[1] += 1; }
-            if value.bcd.cd.c { counts[2] += 1; }
-            if value.bcd.cd.d { counts[3] += 1; }
+            if value.a {
+                counts[0] += 1;
+            }
+            if value.bcd.b {
+                counts[1] += 1;
+            }
+            if value.bcd.cd.c {
+                counts[2] += 1;
+            }
+            if value.bcd.cd.d {
+                counts[3] += 1;
+            }
         }
 
         assert_uniform(&counts, "field");
@@ -1320,8 +1356,14 @@ mod tests {
 
     impl Mutate<EnumCd> for EnumCdMutator {
         fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut EnumCd) -> Result<()> {
-            c.mutation(|_| { *value = EnumCd::C; Ok(()) })?;
-            c.mutation(|_| { *value = EnumCd::D; Ok(()) })?;
+            c.mutation(|_| {
+                *value = EnumCd::C;
+                Ok(())
+            })?;
+            c.mutation(|_| {
+                *value = EnumCd::D;
+                Ok(())
+            })?;
             Ok(())
         }
     }
@@ -1332,11 +1374,20 @@ mod tests {
 
     impl Mutate<EnumBcd> for EnumBcdMutator {
         fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut EnumBcd) -> Result<()> {
-            c.mutation(|_| { *value = EnumBcd::B; Ok(()) })?;
+            c.mutation(|_| {
+                *value = EnumBcd::B;
+                Ok(())
+            })?;
             match value {
                 EnumBcd::B => {
-                    c.mutation(|_| { *value = EnumBcd::Cd(EnumCd::C); Ok(()) })?;
-                    c.mutation(|_| { *value = EnumBcd::Cd(EnumCd::D); Ok(()) })?;
+                    c.mutation(|_| {
+                        *value = EnumBcd::Cd(EnumCd::C);
+                        Ok(())
+                    })?;
+                    c.mutation(|_| {
+                        *value = EnumBcd::Cd(EnumCd::D);
+                        Ok(())
+                    })?;
                 }
                 EnumBcd::Cd(cd) => {
                     self.cd.mutate(c, cd)?;
@@ -1352,12 +1403,24 @@ mod tests {
 
     impl Mutate<EnumAbcd> for EnumAbcdMutator {
         fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut EnumAbcd) -> Result<()> {
-            c.mutation(|_| { *value = EnumAbcd::A; Ok(()) })?;
+            c.mutation(|_| {
+                *value = EnumAbcd::A;
+                Ok(())
+            })?;
             match value {
                 EnumAbcd::A => {
-                    c.mutation(|_| { *value = EnumAbcd::Bcd(EnumBcd::B); Ok(()) })?;
-                    c.mutation(|_| { *value = EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::C)); Ok(()) })?;
-                    c.mutation(|_| { *value = EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::D)); Ok(()) })?;
+                    c.mutation(|_| {
+                        *value = EnumAbcd::Bcd(EnumBcd::B);
+                        Ok(())
+                    })?;
+                    c.mutation(|_| {
+                        *value = EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::C));
+                        Ok(())
+                    })?;
+                    c.mutation(|_| {
+                        *value = EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::D));
+                        Ok(())
+                    })?;
                 }
                 EnumAbcd::Bcd(bcd) => {
                     self.bcd.mutate(c, bcd)?;
