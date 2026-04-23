@@ -242,6 +242,7 @@ impl<T> std::error::Error for CheckFailure<T> where T: Debug {}
 pub struct Check {
     iters: usize,
     shrink_iters: usize,
+    seed: Option<u64>,
 }
 
 impl Default for Check {
@@ -256,6 +257,7 @@ impl Check {
         Check {
             iters: 1000,
             shrink_iters: 1000,
+            seed: None,
         }
     }
 
@@ -269,6 +271,15 @@ impl Check {
     /// reporting the failure.
     pub fn shrink_iters(&mut self, shrink_iters: usize) -> &mut Check {
         self.shrink_iters = shrink_iters;
+        self
+    }
+
+    /// Configure the RNG seed used for mutation.
+    ///
+    /// By default, the seed is chosen automatically. Use this method to make
+    /// a check deterministically reproducible.
+    pub fn seed(&mut self, seed: u64) -> &mut Check {
+        self.seed = Some(seed);
         self
     }
 
@@ -336,7 +347,10 @@ impl Check {
 
         // Second, run the check on mutated values derived from the corpus for
         // the configured iterations.
-        let mut session = Session::new();
+        let mut session = match self.seed {
+            Some(seed) => Session::new().seed(seed),
+            None => Session::new(),
+        };
         for _ in 0..self.iters {
             let index = session.context.rng().gen_index(corpus.len()).unwrap();
 
@@ -393,7 +407,10 @@ impl Check {
 
         log::debug!("shrinking for {} iters...", self.shrink_iters);
 
-        let mut session = Session::new().shrink(true);
+        let mut session = match self.seed {
+            Some(seed) => Session::new().seed(seed).shrink(true),
+            None => Session::new().shrink(true),
+        };
 
         for _ in 0..self.shrink_iters {
             let mut candidate = value.clone();
