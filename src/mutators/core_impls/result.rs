@@ -38,7 +38,11 @@ where
     N: Generate<E>,
 {
     #[inline]
-    fn mutation_count(&self, value: &core::result::Result<T, E>, shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        value: &core::result::Result<T, E>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
         match value {
             Ok(x) => {
                 let mut count = 0u32;

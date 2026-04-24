@@ -52,7 +52,11 @@ where
     }
 
     #[inline]
-    fn mutation_count(&self, value: &core::ops::Range<T>, shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        value: &core::ops::Range<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
         let mut count = 0u32;
         // Mutate start.
         count += self.mutator.mutation_count(&value.start, shrink)?;
@@ -133,7 +137,11 @@ where
     }
 
     #[inline]
-    fn mutation_count(&self, value: &core::ops::RangeFrom<T>, shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        value: &core::ops::RangeFrom<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
         self.mutator.mutation_count(&value.start, shrink)
     }
 }
@@ -204,7 +212,11 @@ where
     T: Default + Clone,
 {
     #[inline]
-    fn mutation_count(&self, _value: &core::ops::RangeInclusive<T>, _shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        _value: &core::ops::RangeInclusive<T>,
+        _shrink: bool,
+    ) -> core::option::Option<u32> {
         // Mutate start + mutate end.
         Some(2)
     }
@@ -305,7 +317,11 @@ where
     }
 
     #[inline]
-    fn mutation_count(&self, value: &core::ops::RangeTo<T>, shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        value: &core::ops::RangeTo<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
         self.mutator.mutation_count(&value.end, shrink)
     }
 }
@@ -382,7 +398,11 @@ where
     }
 
     #[inline]
-    fn mutation_count(&self, value: &core::ops::RangeToInclusive<T>, shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        value: &core::ops::RangeToInclusive<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
         self.mutator.mutation_count(&value.end, shrink)
     }
 }
@@ -452,7 +472,11 @@ where
     M: Generate<T>,
 {
     #[inline]
-    fn mutation_count(&self, value: &core::ops::Bound<T>, shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        value: &core::ops::Bound<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
         match value {
             core::ops::Bound::Included(v) => {
                 let mut count = 0u32;

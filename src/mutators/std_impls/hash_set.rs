@@ -49,7 +49,11 @@ where
     T: Eq + Hash,
 {
     #[inline]
-    fn mutation_count(&self, value: &std::collections::HashSet<T>, shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        value: &std::collections::HashSet<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
         let mut count = 0u32;
         // Add an element.
         count += !shrink as u32;

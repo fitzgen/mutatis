@@ -54,7 +54,11 @@ where
     K: Eq + Hash,
 {
     #[inline]
-    fn mutation_count(&self, value: &std::collections::HashMap<K, V>, shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        value: &std::collections::HashMap<K, V>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
         let mut count = 0u32;
         // Add an entry.
         count += !shrink as u32;

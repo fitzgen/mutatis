@@ -52,7 +52,11 @@ where
     }
 
     #[inline]
-    fn mutation_count(&self, value: &core::cell::RefCell<T>, shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        value: &core::cell::RefCell<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
         self.mutator.mutation_count(&*value.borrow(), shrink)
     }
 }

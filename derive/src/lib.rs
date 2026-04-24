@@ -829,8 +829,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                     for f in fields.named.iter() {
                         if FieldBehavior::for_field(f).unwrap().is_some() {
                             let field_ident = &f.ident;
-                            let mutator_ident =
-                                &mutator_ty.mutator_fields[mutator_field_idx].ident;
+                            let mutator_ident = &mutator_ty.mutator_fields[mutator_field_idx].ident;
                             mutator_field_idx += 1;
                             field_counts.push(quote! {
                                 _count += self.#mutator_ident.mutation_count(
@@ -848,8 +847,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                                 index: u32::try_from(i).unwrap(),
                                 span: f.span(),
                             };
-                            let mutator_ident =
-                                &mutator_ty.mutator_fields[mutator_field_idx].ident;
+                            let mutator_ident = &mutator_ty.mutator_fields[mutator_field_idx].ident;
                             mutator_field_idx += 1;
                             field_counts.push(quote! {
                                 _count += self.#mutator_ident.mutation_count(
@@ -912,8 +910,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                         let mut fld_counts = vec![];
                         for (i, f) in fields.unnamed.iter().enumerate() {
                             if FieldBehavior::for_field(f).unwrap().is_some() {
-                                let binding =
-                                    Ident::new(&format!("field{}", i), f.span());
+                                let binding = Ident::new(&format!("field{}", i), f.span());
                                 patterns.push(quote! { ref #binding, });
                                 let mutator_ident =
                                     &mutator_ty.mutator_fields[mutator_field_idx].ident;

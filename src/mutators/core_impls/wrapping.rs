@@ -51,7 +51,11 @@ where
     }
 
     #[inline]
-    fn mutation_count(&self, value: &core::num::Wrapping<T>, shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        value: &core::num::Wrapping<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
         self.mutator.mutation_count(&value.0, shrink)
     }
 }

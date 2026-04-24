@@ -54,7 +54,11 @@ fn gen_nonzero_byte(ctx: &mut Context) -> u8 {
 
 impl Mutate<alloc::ffi::CString> for CStringMutator {
     #[inline]
-    fn mutation_count(&self, value: &alloc::ffi::CString, shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        value: &alloc::ffi::CString,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
         let mut count = 0u32;
         // Mutate a random byte.
         count += !value.as_bytes().is_empty() as u32;

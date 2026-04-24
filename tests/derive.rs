@@ -71,12 +71,25 @@ fn derive_struct_mutation_is_uniform() {
     let mut counts = [0usize; 4];
 
     for _ in 0..ITERS {
-        let mut value = FourFields { a: false, b: false, c: false, d: false };
+        let mut value = FourFields {
+            a: false,
+            b: false,
+            c: false,
+            d: false,
+        };
         session.mutate(&mut value).unwrap();
-        if value.a { counts[0] += 1; }
-        if value.b { counts[1] += 1; }
-        if value.c { counts[2] += 1; }
-        if value.d { counts[3] += 1; }
+        if value.a {
+            counts[0] += 1;
+        }
+        if value.b {
+            counts[1] += 1;
+        }
+        if value.c {
+            counts[2] += 1;
+        }
+        if value.d {
+            counts[3] += 1;
+        }
     }
 
     assert_uniform(&counts, ITERS, "field");
@@ -116,10 +129,18 @@ fn derive_nested_struct_mutation_is_uniform() {
             },
         };
         session.mutate(&mut value).unwrap();
-        if value.a { counts[0] += 1; }
-        if value.bcd.b { counts[1] += 1; }
-        if value.bcd.cd.c { counts[2] += 1; }
-        if value.bcd.cd.d { counts[3] += 1; }
+        if value.a {
+            counts[0] += 1;
+        }
+        if value.bcd.b {
+            counts[1] += 1;
+        }
+        if value.bcd.cd.c {
+            counts[2] += 1;
+        }
+        if value.bcd.cd.d {
+            counts[3] += 1;
+        }
     }
 
     assert_uniform(&counts, ITERS, "field");
@@ -167,7 +188,9 @@ fn derive_nested_enum_mutation_is_uniform() {
             EnumAbcd::Bcd(EnumBcd::B) => 1,
             EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::C)) => 2,
             EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::D)) => {
-                panic!("should not stay at D; the derive mutator switches away from current variant")
+                panic!(
+                    "should not stay at D; the derive mutator switches away from current variant"
+                )
             }
         }] += 1;
     }

@@ -48,7 +48,11 @@ where
     }
 
     #[inline]
-    fn mutation_count(&self, value: &core::option::Option<T>, shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        value: &core::option::Option<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
         if shrink && value.is_none() {
             return Some(0);
         }
@@ -136,7 +140,11 @@ where
     }
 
     #[inline]
-    fn mutation_count(&self, value: &core::option::Option<T>, shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        value: &core::option::Option<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
         match value {
             None if shrink => Some(0),
             // Generate a Some value.
@@ -199,7 +207,11 @@ impl<T> Mutate<core::option::Option<T>> for None {
     }
 
     #[inline]
-    fn mutation_count(&self, value: &core::option::Option<T>, _shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        value: &core::option::Option<T>,
+        _shrink: bool,
+    ) -> core::option::Option<u32> {
         // Set to None.
         Some(value.is_some() as u32)
     }

@@ -248,11 +248,7 @@ pub fn char() -> Char {
 impl Mutate<char> for Char {
     #[inline]
     fn mutation_count(&self, value: &char, shrink: bool) -> core::option::Option<u32> {
-        Some(if shrink {
-            (*value != '\0') as u32
-        } else {
-            8
-        })
+        Some(if shrink { (*value != '\0') as u32 } else { 8 })
     }
 
     #[inline]
@@ -393,11 +389,7 @@ pub fn ascii_char() -> AsciiChar {
 impl Mutate<char> for AsciiChar {
     #[inline]
     fn mutation_count(&self, value: &char, shrink: bool) -> core::option::Option<u32> {
-        Some(if shrink {
-            (*value != '\0') as u32
-        } else {
-            1
-        })
+        Some(if shrink { (*value != '\0') as u32 } else { 1 })
     }
 
     #[inline]

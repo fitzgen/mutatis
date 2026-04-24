@@ -45,7 +45,11 @@ where
     C: Generate<char>,
 {
     #[inline]
-    fn mutation_count(&self, value: &alloc::string::String, shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        value: &alloc::string::String,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
         let mut count = 0u32;
         // Remove a random character.
         count += !value.is_empty() as u32;

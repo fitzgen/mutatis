@@ -46,7 +46,11 @@ impl<T> Mutate<marker::PhantomData<T>> for PhantomDataMutator<T> {
     }
 
     #[inline]
-    fn mutation_count(&self, _value: &marker::PhantomData<T>, _shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        _value: &marker::PhantomData<T>,
+        _shrink: bool,
+    ) -> core::option::Option<u32> {
         Some(0)
     }
 }

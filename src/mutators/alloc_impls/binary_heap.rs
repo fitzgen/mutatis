@@ -48,7 +48,11 @@ where
     T: Ord,
 {
     #[inline]
-    fn mutation_count(&self, value: &alloc::collections::BinaryHeap<T>, shrink: bool) -> core::option::Option<u32> {
+    fn mutation_count(
+        &self,
+        value: &alloc::collections::BinaryHeap<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
         let mut count = 0u32;
         // Add an element.
         count += !shrink as u32;
