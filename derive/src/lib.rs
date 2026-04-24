@@ -754,15 +754,14 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                 }
 
                 let num_variants = data.variants.len();
-                let switch_stmts: Vec<_> = variant_mutations
+                let group_count = num_variants - 1;
+                let group_arms: Vec<_> = variant_mutations
                     .iter()
                     .map(|(v_idx, construction)| {
                         quote! {
-                            if _variant_index != #v_idx {
-                                mutations.mutation(|ctx| {
-                                    #construction
-                                    Ok(())
-                                })?;
+                            #v_idx => {
+                                #construction
+                                Ok(())
                             }
                         }
                     })
@@ -772,8 +771,17 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                     let _variant_index: usize = match value {
                         #( #index_arms )*
                     };
-                    let _ = #num_variants;
-                    #( #switch_stmts )*
+                    mutations.mutation_group(#group_count as u32, |ctx, _which| {
+                        let _target = if (_which as usize) >= _variant_index {
+                            _which as usize + 1
+                        } else {
+                            _which as usize
+                        };
+                        match _target {
+                            #( #group_arms )*
+                            _ => unreachable!(),
+                        }
+                    })?;
                 }
             } else {
                 quote! {}

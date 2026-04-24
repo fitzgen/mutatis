@@ -495,6 +495,77 @@ impl<'a> Candidates<'a> {
         }
     }
 
+    /// Register `count` candidate mutations as a group.
+    ///
+    /// During counting, this increments the candidate counter by `count` in a
+    /// single step. During mutation, if the chosen target falls within this
+    /// group, `f` is called with the offset within the group (`0..count`).
+    ///
+    /// This is useful when you have many related mutations (such as enum
+    /// variant switches) that can be dispatched by index rather than
+    /// registered one at a time via [`mutation`][Candidates::mutation].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn foo() -> mutatis::Result<()> {
+    /// use mutatis::{Candidates, Mutate, Result, Session};
+    ///
+    /// #[derive(Clone, Copy, Debug, PartialEq)]
+    /// enum Direction { North, South, East, West }
+    ///
+    /// struct DirectionMutator;
+    ///
+    /// impl Mutate<Direction> for DirectionMutator {
+    ///     fn mutate(
+    ///         &mut self,
+    ///         mutations: &mut Candidates<'_>,
+    ///         value: &mut Direction,
+    ///     ) -> Result<()> {
+    ///         // Register three variant-switch mutations (all directions
+    ///         // other than the current one) in a single call.
+    ///         let current = *value as u32;
+    ///         mutations.mutation_group(3, |_ctx, which| {
+    ///             let target = if which >= current { which + 1 } else { which };
+    ///             *value = match target {
+    ///                 0 => Direction::North,
+    ///                 1 => Direction::South,
+    ///                 2 => Direction::East,
+    ///                 _ => Direction::West,
+    ///             };
+    ///             Ok(())
+    ///         })?;
+    ///         Ok(())
+    ///     }
+    /// }
+    ///
+    /// let mut direction = Direction::North;
+    /// let mut session = Session::new();
+    /// for _ in 0..5 {
+    ///     session.mutate_with(&mut DirectionMutator, &mut direction)?;
+    ///     println!("direction is now {direction:?}");
+    /// }
+    /// # Ok(())
+    /// # }
+    /// # foo().unwrap();
+    /// ```
+    #[inline]
+    pub fn mutation_group(
+        &mut self,
+        count: u32,
+        f: impl FnOnce(&mut Context, u32) -> Result<()>,
+    ) -> Result<()> {
+        let base = self.phase.current;
+        self.phase.current = base + count;
+        if self.phase.target.wrapping_sub(base) < count {
+            self.applied_mutation = true;
+            f(&mut self.context, self.phase.target - base)?;
+            Err(Error::early_exit())
+        } else {
+            Ok(())
+        }
+    }
+
     /// Whether only shrinking mutations should be registered in this mutation
     /// set or not.
     ///
@@ -1450,6 +1521,92 @@ mod tests {
         }
 
         assert_uniform(&counts, "variant");
+    }
+
+    // ---- mutation_group with four alternatives ----
+
+    #[derive(Clone, Copy)]
+    enum FourGroupAlts {
+        A,
+        B,
+        C,
+        D,
+    }
+
+    struct FourGroupAltsMutator;
+
+    impl Mutate<FourGroupAlts> for FourGroupAltsMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut FourGroupAlts) -> Result<()> {
+            c.mutation_group(4, |_ctx, which| {
+                *value = match which {
+                    0 => FourGroupAlts::A,
+                    1 => FourGroupAlts::B,
+                    2 => FourGroupAlts::C,
+                    _ => FourGroupAlts::D,
+                };
+                Ok(())
+            })?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn mutation_group_is_uniform() {
+        let mut session = Session::new();
+        let mut value = FourGroupAlts::A;
+        let mut counts = [0usize; 4];
+        let mut mutator = FourGroupAltsMutator;
+
+        for _ in 0..ITERS {
+            session.mutate_with(&mut mutator, &mut value).unwrap();
+            counts[match value {
+                FourGroupAlts::A => 0,
+                FourGroupAlts::B => 1,
+                FourGroupAlts::C => 2,
+                FourGroupAlts::D => 3,
+            }] += 1;
+        }
+
+        assert_uniform(&counts, "mutation_group alt");
+    }
+
+    // ---- mutation_group mixed with individual mutations ----
+
+    struct MixedGroupMutator;
+
+    impl Mutate<FourGroupAlts> for MixedGroupMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut FourGroupAlts) -> Result<()> {
+            c.mutation_group(2, |_ctx, which| {
+                *value = match which {
+                    0 => FourGroupAlts::A,
+                    _ => FourGroupAlts::B,
+                };
+                Ok(())
+            })?;
+            c.mutation(|_ctx| { *value = FourGroupAlts::C; Ok(()) })?;
+            c.mutation(|_ctx| { *value = FourGroupAlts::D; Ok(()) })?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn mutation_group_mixed_with_individual_is_uniform() {
+        let mut session = Session::new();
+        let mut value = FourGroupAlts::A;
+        let mut counts = [0usize; 4];
+        let mut mutator = MixedGroupMutator;
+
+        for _ in 0..ITERS {
+            session.mutate_with(&mut mutator, &mut value).unwrap();
+            counts[match value {
+                FourGroupAlts::A => 0,
+                FourGroupAlts::B => 1,
+                FourGroupAlts::C => 2,
+                FourGroupAlts::D => 3,
+            }] += 1;
+        }
+
+        assert_uniform(&counts, "mixed group alt");
     }
 }
 

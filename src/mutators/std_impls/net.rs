@@ -47,15 +47,12 @@ impl Mutate<Ipv4Addr> for Ipv4AddrMutator {
     #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut Ipv4Addr) -> Result<()> {
         // Mutate an octet.
-        for i in 0..4 {
-            c.mutation(|ctx| {
-                let octets = value.octets();
-                let mut new = octets;
-                new[i] = ctx.rng().gen_u8();
-                *value = Ipv4Addr::from(new);
-                Ok(())
-            })?;
-        }
+        c.mutation_group(4, |ctx, which| {
+            let mut octets = value.octets();
+            octets[which as usize] = ctx.rng().gen_u8();
+            *value = Ipv4Addr::from(octets);
+            Ok(())
+        })?;
 
         // Special: loopback.
         c.mutation(|_ctx| {
@@ -152,15 +149,12 @@ impl Mutate<Ipv6Addr> for Ipv6AddrMutator {
     #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut Ipv6Addr) -> Result<()> {
         // Mutate a segment.
-        for i in 0..8 {
-            c.mutation(|ctx| {
-                let segs = value.segments();
-                let mut new = segs;
-                new[i] = ctx.rng().gen_u16();
-                *value = Ipv6Addr::from(new);
-                Ok(())
-            })?;
-        }
+        c.mutation_group(8, |ctx, which| {
+            let mut segs = value.segments();
+            segs[which as usize] = ctx.rng().gen_u16();
+            *value = Ipv6Addr::from(segs);
+            Ok(())
+        })?;
 
         // Special: loopback (::1).
         c.mutation(|_ctx| {
