@@ -329,39 +329,38 @@ impl Context {
         mutator: &mut (impl Mutate<T> + ?Sized),
         value: &mut T,
     ) -> Result<()> {
-        self.choose_and_apply_mutation(value, |c, value| mutator.mutate(c, value))
+        if let Some(count) = mutator.mutation_count(value, self.shrink) {
+            self.apply_mutation(value, count, |c, value| mutator.mutate(c, value))
+        } else {
+            self.choose_and_apply_mutation(value, |c, value| mutator.mutate(c, value))
+        }
     }
 
-    fn choose_and_apply_mutation<T>(
+    fn apply_mutation<T>(
         &mut self,
         value: &mut T,
+        count: u32,
         mut mutate_impl: impl FnMut(&mut Candidates, &mut T) -> Result<()>,
     ) -> Result<()> {
-        log::trace!("=== choosing an applying a mutation ===");
+        log::trace!("=== applying mutation (fast path, count={count}) ===");
 
-        // Count how many mutations we *could* perform.
-        let mut candidates = Candidates {
-            context: self,
-            phase: Phase::counting(),
-            applied_mutation: false,
-        };
-        mutate_impl(&mut candidates, value)?;
+        let count_usize = usize::try_from(count).unwrap();
 
-        let count = usize::try_from(candidates.phase.current).unwrap();
-        log::trace!("counted {count} mutations");
-
-        if count == 0 {
+        if count_usize == 0 {
             log::trace!("mutator exhausted");
             return Err(Error::exhausted());
         }
 
-        // Choose a random target mutation to actually perform.
-        let target = candidates.context.rng().gen_index(count).unwrap();
+        let target = self.rng().gen_index(count_usize).unwrap();
         log::trace!("targeting mutation {target}");
-        debug_assert!(target < count);
+        debug_assert!(target < count_usize);
 
-        // Perform the chosen target mutation.
-        candidates.phase = Phase::mutate(u32::try_from(target).unwrap());
+        let mut candidates = Candidates {
+            context: self,
+            phase: Phase::mutate(u32::try_from(target).unwrap()),
+            applied_mutation: false,
+        };
+
         match mutate_impl(&mut candidates, value) {
             Err(e) if e.is_early_exit() => {
                 log::trace!("mutation applied successfully");
@@ -373,32 +372,44 @@ impl Context {
                 Err(e)
             }
 
-            // We should have found the target mutation, applied it, and then
-            // broken out of mutation enumeration by returning an early-exit
-            // error. So either we are facing a nondeterministic mutation
-            // enumeration or a mutator is missing a `?` and is failing to
-            // propagate the early-exit error to us. Differentiate between these
-            // two cases via the `applied_mutation` flag.
             Ok(()) if candidates.applied_mutation => {
                 panic!(
                     "We applied a mutation but did not receive an early-exit error \
                      from the mutator. This means that errors are not always being \
                      propagated, for example a `?` is missing from a call to the \
-                     `Candidates::mutation` method. Errors must be propagated \
-                     in `Mutate::mutate` et al method implementations; failure to do \
-                     so can lead to bugs, panics, and degraded performance.",
+                     `Candidates::mutation` method.",
                 )
             }
             Ok(()) => {
-                let current = candidates.phase.current;
+                let found = candidates.phase.current;
                 panic!(
-                    "Nondeterministic mutator implementation: did not enumerate the \
-                     same set of mutations when given the same value! Counted {count} \
-                     mutations in the first pass, but only found {current} mutations on \
-                     the second pass. Mutators must be deterministic.",
+                    "Mutation count mismatch: expected {count} candidates but \
+                     mutate only enumerated {found}. Ensure mutation_count and \
+                     mutate agree, and that mutate is deterministic.",
                 )
             }
         }
+    }
+
+    fn choose_and_apply_mutation<T>(
+        &mut self,
+        value: &mut T,
+        mut mutate_impl: impl FnMut(&mut Candidates, &mut T) -> Result<()>,
+    ) -> Result<()> {
+        log::trace!("=== choosing and applying a mutation ===");
+
+        let count = {
+            let mut candidates = Candidates {
+                context: self,
+                phase: Phase::counting(),
+                applied_mutation: false,
+            };
+            mutate_impl(&mut candidates, value)?;
+            candidates.phase.current
+        };
+        log::trace!("counted {count} mutations");
+
+        self.apply_mutation(value, count, mutate_impl)
     }
 
     #[inline]
@@ -829,6 +840,19 @@ where
     /// # foo().unwrap();
     /// ```
     fn mutate(&mut self, mutations: &mut Candidates<'_>, value: &mut T) -> Result<()>;
+
+    /// Return the number of mutations that [`mutate`][Mutate::mutate] would
+    /// register for the given `value`.
+    ///
+    /// The default implementation returns `u32::MAX`, which signals that the
+    /// count is unknown and the framework should fall back to a counting pass
+    /// through [`mutate`][Mutate::mutate]. Implementations that can compute
+    /// the count cheaply should override this method.
+    #[inline]
+    fn mutation_count(&self, value: &T, shrink: bool) -> Option<u32> {
+        let _ = (value, shrink);
+        None
+    }
 
     // Provided methods.
 
@@ -1583,8 +1607,14 @@ mod tests {
                 };
                 Ok(())
             })?;
-            c.mutation(|_ctx| { *value = FourGroupAlts::C; Ok(()) })?;
-            c.mutation(|_ctx| { *value = FourGroupAlts::D; Ok(()) })?;
+            c.mutation(|_ctx| {
+                *value = FourGroupAlts::C;
+                Ok(())
+            })?;
+            c.mutation(|_ctx| {
+                *value = FourGroupAlts::D;
+                Ok(())
+            })?;
             Ok(())
         }
     }
@@ -1623,6 +1653,11 @@ where
 {
     fn mutate(&mut self, c: &mut Candidates, value: &mut T) -> Result<()> {
         (**self).mutate(c, value)
+    }
+
+    #[inline]
+    fn mutation_count(&self, value: &T, shrink: bool) -> Option<u32> {
+        (**self).mutation_count(value, shrink)
     }
 }
 

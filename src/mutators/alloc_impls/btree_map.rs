@@ -54,6 +54,22 @@ where
     K: Ord,
 {
     #[inline]
+    fn mutation_count(&self, value: &alloc::collections::BTreeMap<K, V>, shrink: bool) -> core::option::Option<u32> {
+        let mut count = 0u32;
+        // Add an entry.
+        count += !shrink as u32;
+        // Remove an entry.
+        count += !value.is_empty() as u32;
+        for (k, v) in value.iter() {
+            // Mutate an existing value.
+            count += self.value_mutator.mutation_count(v, shrink)?;
+            // Mutate an existing key.
+            count += self.key_mutator.mutation_count(k, shrink)?;
+        }
+        Some(count)
+    }
+
+    #[inline]
     fn mutate(
         &mut self,
         c: &mut Candidates,

@@ -20,6 +20,11 @@ where
         self.right.mutate(c, value)?;
         Ok(())
     }
+
+    #[inline]
+    fn mutation_count(&self, value: &T, shrink: bool) -> core::option::Option<u32> {
+        Some(self.left.mutation_count(value, shrink)? + self.right.mutation_count(value, shrink)?)
+    }
 }
 
 impl<M1, M2, T> Generate<T> for Or<M1, M2>
@@ -60,6 +65,11 @@ where
             }
             res => res,
         }
+    }
+
+    #[inline]
+    fn mutation_count(&self, value: &T, shrink: bool) -> core::option::Option<u32> {
+        self.mutator.mutation_count(value, shrink)
     }
 }
 
@@ -162,6 +172,11 @@ where
     #[inline]
     fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut T) -> Result<()> {
         c.mutation(|_| Ok(*value = self.value.clone()))
+    }
+
+    #[inline]
+    fn mutation_count(&self, _value: &T, _shrink: bool) -> core::option::Option<u32> {
+        Some(1)
     }
 }
 

@@ -44,6 +44,21 @@ pub fn os_string() -> OsStringMutator {
 
 impl Mutate<OsString> for OsStringMutator {
     #[inline]
+    fn mutation_count(&self, value: &OsString, shrink: bool) -> core::option::Option<u32> {
+        let can_remove = value.to_str().map_or(false, |s| !s.is_empty());
+        let mut count = 0u32;
+        // Remove a random character.
+        count += can_remove as u32;
+        // Add a random character.
+        count += !shrink as u32;
+        // Special: empty.
+        count += !value.is_empty() as u32;
+        // Specials: ".", "..", "/", "\\".
+        count += 4;
+        Some(count)
+    }
+
+    #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut OsString) -> Result<()> {
         // Remove a random character.
         if let Some(s) = value.to_str() {

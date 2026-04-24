@@ -54,6 +54,18 @@ fn gen_nonzero_byte(ctx: &mut Context) -> u8 {
 
 impl Mutate<alloc::ffi::CString> for CStringMutator {
     #[inline]
+    fn mutation_count(&self, value: &alloc::ffi::CString, shrink: bool) -> core::option::Option<u32> {
+        let mut count = 0u32;
+        // Mutate a random byte.
+        count += !value.as_bytes().is_empty() as u32;
+        // Insert a random non-zero byte.
+        count += !shrink as u32;
+        // Remove a random byte.
+        count += !value.as_bytes().is_empty() as u32;
+        Some(count)
+    }
+
+    #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut alloc::ffi::CString) -> Result<()> {
         let bytes = value.clone().into_bytes();
 

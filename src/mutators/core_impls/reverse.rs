@@ -49,6 +49,11 @@ where
     fn mutate(&mut self, c: &mut Candidates, value: &mut core::cmp::Reverse<T>) -> Result<()> {
         self.mutator.mutate(c, &mut value.0)
     }
+
+    #[inline]
+    fn mutation_count(&self, value: &core::cmp::Reverse<T>, shrink: bool) -> core::option::Option<u32> {
+        self.mutator.mutation_count(&value.0, shrink)
+    }
 }
 
 impl<M, T> Generate<core::cmp::Reverse<T>> for Reverse<M>

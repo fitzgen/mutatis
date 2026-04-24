@@ -47,6 +47,22 @@ where
     M: Generate<T> + Mutate<T>,
 {
     #[inline]
+    fn mutation_count(&self, value: &alloc::collections::VecDeque<T>, shrink: bool) -> core::option::Option<u32> {
+        let mut count = 0u32;
+        // Add an element.
+        count += !shrink as u32;
+        // Remove an element.
+        count += !value.is_empty() as u32;
+        // Swap two elements.
+        count += (value.len() >= 2) as u32;
+        // Mutate an existing element.
+        for x in value.iter() {
+            count += self.mutator.mutation_count(x, shrink)?;
+        }
+        Some(count)
+    }
+
+    #[inline]
     fn mutate(
         &mut self,
         c: &mut Candidates,

@@ -46,6 +46,25 @@ where
             }
         }
     }
+
+    #[inline]
+    fn mutation_count(&self, value: &core::option::Option<T>, shrink: bool) -> core::option::Option<u32> {
+        if shrink && value.is_none() {
+            return Some(0);
+        }
+        match value {
+            // Generate a Some value.
+            None => Some(1),
+            Some(v) => {
+                let mut count = 0u32;
+                // Mutate inner value.
+                count += self.mutator.mutation_count(v, shrink)?;
+                // Set to None.
+                count += 1;
+                Some(count)
+            }
+        }
+    }
 }
 
 impl<M, T> Generate<core::option::Option<T>> for Option<M>
@@ -115,6 +134,17 @@ where
             Some(v) => self.mutator.mutate(c, v),
         }
     }
+
+    #[inline]
+    fn mutation_count(&self, value: &core::option::Option<T>, shrink: bool) -> core::option::Option<u32> {
+        match value {
+            None if shrink => Some(0),
+            // Generate a Some value.
+            None => Some(1),
+            // Mutate inner value.
+            Some(v) => self.mutator.mutation_count(v, shrink),
+        }
+    }
 }
 
 impl<M, T> Generate<core::option::Option<T>> for Some<M>
@@ -166,6 +196,12 @@ impl<T> Mutate<core::option::Option<T>> for None {
             c.mutation(|_| Ok(*value = None))?;
         }
         Ok(())
+    }
+
+    #[inline]
+    fn mutation_count(&self, value: &core::option::Option<T>, _shrink: bool) -> core::option::Option<u32> {
+        // Set to None.
+        Some(value.is_some() as u32)
     }
 }
 

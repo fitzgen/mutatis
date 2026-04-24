@@ -54,6 +54,17 @@ where
     N: Mutate<u32>,
 {
     #[inline]
+    fn mutation_count(&self, _value: &core::time::Duration, shrink: bool) -> core::option::Option<u32> {
+        Some(if shrink {
+            // Mutate secs and nanos + ZERO.
+            2
+        } else {
+            // Mutate secs and nanos + 8 special values.
+            9
+        })
+    }
+
+    #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut core::time::Duration) -> Result<()> {
         c.mutation(|ctx| {
             let mut secs = value.as_secs();

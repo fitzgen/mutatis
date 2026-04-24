@@ -38,6 +38,28 @@ where
     N: Generate<E>,
 {
     #[inline]
+    fn mutation_count(&self, value: &core::result::Result<T, E>, shrink: bool) -> core::option::Option<u32> {
+        match value {
+            Ok(x) => {
+                let mut count = 0u32;
+                // Mutate inner Ok value.
+                count += self.ok_mutator.mutation_count(x, shrink)?;
+                // Generate an Err value.
+                count += !shrink as u32;
+                Some(count)
+            }
+            Err(e) => {
+                let mut count = 0u32;
+                // Mutate inner Err value.
+                count += self.err_mutator.mutation_count(e, shrink)?;
+                // Generate an Ok value.
+                count += 1;
+                Some(count)
+            }
+        }
+    }
+
+    #[inline]
     fn mutate(
         &mut self,
         c: &mut Candidates,

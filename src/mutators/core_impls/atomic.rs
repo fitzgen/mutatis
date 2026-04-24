@@ -50,6 +50,12 @@ impl Mutate<core::sync::atomic::AtomicBool> for AtomicBool {
     ) -> Result<()> {
         self.inner.mutate(c, value.get_mut())
     }
+
+    #[inline]
+    fn mutation_count(&self, value: &core::sync::atomic::AtomicBool, shrink: bool) -> core::option::Option<u32> {
+        let v = value.load(core::sync::atomic::Ordering::Relaxed);
+        self.inner.mutation_count(&v, shrink)
+    }
 }
 
 impl Generate<core::sync::atomic::AtomicBool> for AtomicBool {
@@ -117,6 +123,12 @@ impl Mutate<core::sync::atomic::AtomicIsize> for AtomicIsize {
     ) -> Result<()> {
         self.inner.mutate(c, value.get_mut())
     }
+
+    #[inline]
+    fn mutation_count(&self, value: &core::sync::atomic::AtomicIsize, shrink: bool) -> core::option::Option<u32> {
+        let v = value.load(core::sync::atomic::Ordering::Relaxed);
+        self.inner.mutation_count(&v, shrink)
+    }
 }
 
 impl Generate<core::sync::atomic::AtomicIsize> for AtomicIsize {
@@ -183,6 +195,12 @@ impl Mutate<core::sync::atomic::AtomicUsize> for AtomicUsize {
         value: &mut core::sync::atomic::AtomicUsize,
     ) -> Result<()> {
         self.inner.mutate(c, value.get_mut())
+    }
+
+    #[inline]
+    fn mutation_count(&self, value: &core::sync::atomic::AtomicUsize, shrink: bool) -> core::option::Option<u32> {
+        let v = value.load(core::sync::atomic::Ordering::Relaxed);
+        self.inner.mutation_count(&v, shrink)
     }
 }
 
