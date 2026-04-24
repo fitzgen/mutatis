@@ -754,15 +754,14 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                 }
 
                 let num_variants = data.variants.len();
-                let switch_stmts: Vec<_> = variant_mutations
+                let group_count = num_variants - 1;
+                let group_arms: Vec<_> = variant_mutations
                     .iter()
                     .map(|(v_idx, construction)| {
                         quote! {
-                            if _variant_index != #v_idx {
-                                mutations.mutation(|ctx| {
-                                    #construction
-                                    Ok(())
-                                })?;
+                            #v_idx => {
+                                #construction
+                                Ok(())
                             }
                         }
                     })
@@ -772,8 +771,17 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                     let _variant_index: usize = match value {
                         #( #index_arms )*
                     };
-                    let _ = #num_variants;
-                    #( #switch_stmts )*
+                    mutations.mutation_group(#group_count as u32, |ctx, _which| {
+                        let _target = if (_which as usize) >= _variant_index {
+                            _which as usize + 1
+                        } else {
+                            _which as usize
+                        };
+                        match _target {
+                            #( #group_arms )*
+                            _ => unreachable!(),
+                        }
+                    })?;
                 }
             } else {
                 quote! {}
@@ -812,6 +820,148 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
         }
     };
 
+    let mutation_count_body = match &input.data {
+        Data::Struct(data) => {
+            let mut field_counts = vec![];
+            let mut mutator_field_idx = 0usize;
+            match &data.fields {
+                Fields::Named(fields) => {
+                    for f in fields.named.iter() {
+                        if FieldBehavior::for_field(f).unwrap().is_some() {
+                            let field_ident = &f.ident;
+                            let mutator_ident = &mutator_ty.mutator_fields[mutator_field_idx].ident;
+                            mutator_field_idx += 1;
+                            field_counts.push(quote! {
+                                _count += self.#mutator_ident.mutation_count(
+                                    &value.#field_ident,
+                                    shrink,
+                                )?;
+                            });
+                        }
+                    }
+                }
+                Fields::Unnamed(fields) => {
+                    for (i, f) in fields.unnamed.iter().enumerate() {
+                        if FieldBehavior::for_field(f).unwrap().is_some() {
+                            let index = Index {
+                                index: u32::try_from(i).unwrap(),
+                                span: f.span(),
+                            };
+                            let mutator_ident = &mutator_ty.mutator_fields[mutator_field_idx].ident;
+                            mutator_field_idx += 1;
+                            field_counts.push(quote! {
+                                _count += self.#mutator_ident.mutation_count(
+                                    &value.#index,
+                                    shrink,
+                                )?;
+                            });
+                        }
+                    }
+                }
+                Fields::Unit => {}
+            }
+            quote! {
+                let mut _count = 0u32;
+                #(#field_counts)*
+                Some(_count)
+            }
+        }
+
+        Data::Enum(data) => {
+            let variant_switch_count = if data.variants.len() > 1 {
+                data.variants.len() - 1
+            } else {
+                0
+            };
+
+            let mut count_arms = vec![];
+            let mut mutator_field_idx = 0usize;
+            for v in data.variants.iter() {
+                let variant_ident = &v.ident;
+                match &v.fields {
+                    Fields::Named(fields) => {
+                        let mut patterns = vec![];
+                        let mut fld_counts = vec![];
+                        for f in fields.named.iter() {
+                            let ident = &f.ident;
+                            if FieldBehavior::for_field(f).unwrap().is_some() {
+                                patterns.push(quote! { ref #ident, });
+                                let mutator_ident =
+                                    &mutator_ty.mutator_fields[mutator_field_idx].ident;
+                                mutator_field_idx += 1;
+                                fld_counts.push(quote! {
+                                    _count += self.#mutator_ident.mutation_count(
+                                        #ident,
+                                        shrink,
+                                    )?;
+                                });
+                            } else {
+                                patterns.push(quote! { #ident: _, });
+                            }
+                        }
+                        count_arms.push(quote! {
+                            #ty_name::#variant_ident { #(#patterns)* } => {
+                                #(#fld_counts)*
+                            }
+                        });
+                    }
+                    Fields::Unnamed(fields) => {
+                        let mut patterns = vec![];
+                        let mut fld_counts = vec![];
+                        for (i, f) in fields.unnamed.iter().enumerate() {
+                            if FieldBehavior::for_field(f).unwrap().is_some() {
+                                let binding = Ident::new(&format!("field{}", i), f.span());
+                                patterns.push(quote! { ref #binding, });
+                                let mutator_ident =
+                                    &mutator_ty.mutator_fields[mutator_field_idx].ident;
+                                mutator_field_idx += 1;
+                                fld_counts.push(quote! {
+                                    _count += self.#mutator_ident.mutation_count(
+                                        #binding,
+                                        shrink,
+                                    )?;
+                                });
+                            } else {
+                                patterns.push(quote! { _, });
+                            }
+                        }
+                        count_arms.push(quote! {
+                            #ty_name::#variant_ident(#(#patterns)*) => {
+                                #(#fld_counts)*
+                            }
+                        });
+                    }
+                    Fields::Unit => {
+                        count_arms.push(quote! {
+                            #ty_name::#variant_ident => {}
+                        });
+                    }
+                }
+            }
+
+            if count_arms.is_empty() {
+                quote! { Some(0u32) }
+            } else {
+                quote! {
+                    let mut _count = #variant_switch_count as u32;
+                    match *value {
+                        #(#count_arms)*
+                    }
+                    Some(_count)
+                }
+            }
+        }
+
+        Data::Union(_) => quote! { None },
+    };
+
+    let mutation_count_method = quote! {
+        #[inline]
+        fn mutation_count(&self, value: &#ty_name, shrink: bool) -> core::option::Option<u32> {
+            #mutation_count_body
+        }
+    };
+
     let mutator_name = &mutator_ty.mutator_name_with_generics(MutatorNameGenericsKind::Generics);
 
     Ok(quote! {
@@ -820,6 +970,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
             #where_clause
         {
             #mutate_method
+            #mutation_count_method
         }
     })
 }

@@ -45,17 +45,20 @@ pub fn ipv4_addr() -> Ipv4AddrMutator {
 
 impl Mutate<Ipv4Addr> for Ipv4AddrMutator {
     #[inline]
+    fn mutation_count(&self, _value: &Ipv4Addr, _shrink: bool) -> core::option::Option<u32> {
+        // 4 octets + 5 specials.
+        Some(9)
+    }
+
+    #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut Ipv4Addr) -> Result<()> {
         // Mutate an octet.
-        for i in 0..4 {
-            c.mutation(|ctx| {
-                let octets = value.octets();
-                let mut new = octets;
-                new[i] = ctx.rng().gen_u8();
-                *value = Ipv4Addr::from(new);
-                Ok(())
-            })?;
-        }
+        c.mutation_group(4, |ctx, which| {
+            let mut octets = value.octets();
+            octets[which as usize] = ctx.rng().gen_u8();
+            *value = Ipv4Addr::from(octets);
+            Ok(())
+        })?;
 
         // Special: loopback.
         c.mutation(|_ctx| {
@@ -150,17 +153,20 @@ pub fn ipv6_addr() -> Ipv6AddrMutator {
 
 impl Mutate<Ipv6Addr> for Ipv6AddrMutator {
     #[inline]
+    fn mutation_count(&self, _value: &Ipv6Addr, _shrink: bool) -> core::option::Option<u32> {
+        // 8 segments + 3 specials.
+        Some(11)
+    }
+
+    #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut Ipv6Addr) -> Result<()> {
         // Mutate a segment.
-        for i in 0..8 {
-            c.mutation(|ctx| {
-                let segs = value.segments();
-                let mut new = segs;
-                new[i] = ctx.rng().gen_u16();
-                *value = Ipv6Addr::from(new);
-                Ok(())
-            })?;
-        }
+        c.mutation_group(8, |ctx, which| {
+            let mut segs = value.segments();
+            segs[which as usize] = ctx.rng().gen_u16();
+            *value = Ipv6Addr::from(segs);
+            Ok(())
+        })?;
 
         // Special: loopback (::1).
         c.mutation(|_ctx| {
@@ -250,6 +256,17 @@ pub fn ip_addr() -> IpAddrMutator {
 
 impl Mutate<IpAddr> for IpAddrMutator {
     #[inline]
+    fn mutation_count(&self, value: &IpAddr, shrink: bool) -> core::option::Option<u32> {
+        // Mutate the inner address.
+        let inner = match value {
+            IpAddr::V4(addr) => self.v4.mutation_count(addr, shrink)?,
+            IpAddr::V6(addr) => self.v6.mutation_count(addr, shrink)?,
+        };
+        // Switch between V4 and V6.
+        Some(inner + 1)
+    }
+
+    #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut IpAddr) -> Result<()> {
         // Mutate the inner address.
         match value {
@@ -329,6 +346,12 @@ pub fn socket_addr_v4() -> SocketAddrV4Mutator {
 
 impl Mutate<SocketAddrV4> for SocketAddrV4Mutator {
     #[inline]
+    fn mutation_count(&self, _value: &SocketAddrV4, _shrink: bool) -> core::option::Option<u32> {
+        // Mutate address + mutate port.
+        Some(2)
+    }
+
+    #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut SocketAddrV4) -> Result<()> {
         // Mutate the address.
         c.mutation(|ctx| {
@@ -404,6 +427,12 @@ pub fn socket_addr_v6() -> SocketAddrV6Mutator {
 }
 
 impl Mutate<SocketAddrV6> for SocketAddrV6Mutator {
+    #[inline]
+    fn mutation_count(&self, _value: &SocketAddrV6, _shrink: bool) -> core::option::Option<u32> {
+        // Mutate address + mutate port + mutate flowinfo + mutate scope_id.
+        Some(4)
+    }
+
     #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut SocketAddrV6) -> Result<()> {
         // Mutate the address.
@@ -495,6 +524,17 @@ pub fn socket_addr() -> SocketAddrMutator {
 }
 
 impl Mutate<SocketAddr> for SocketAddrMutator {
+    #[inline]
+    fn mutation_count(&self, value: &SocketAddr, shrink: bool) -> core::option::Option<u32> {
+        // Mutate the inner address.
+        let inner = match value {
+            SocketAddr::V4(addr) => self.v4.mutation_count(addr, shrink)?,
+            SocketAddr::V6(addr) => self.v6.mutation_count(addr, shrink)?,
+        };
+        // Switch between V4 and V6.
+        Some(inner + 1)
+    }
+
     #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut SocketAddr) -> Result<()> {
         // Mutate the inner address.

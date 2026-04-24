@@ -48,6 +48,15 @@ where
     fn mutate(&mut self, c: &mut Candidates, value: &mut alloc::boxed::Box<T>) -> Result<()> {
         self.mutator.mutate(c, value.as_mut())
     }
+
+    #[inline]
+    fn mutation_count(
+        &self,
+        value: &alloc::boxed::Box<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
+        self.mutator.mutation_count(value.as_ref(), shrink)
+    }
 }
 
 impl<M, T> Generate<alloc::boxed::Box<T>> for Boxed<M>

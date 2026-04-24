@@ -45,6 +45,18 @@ pub fn path_buf() -> PathBufMutator {
 
 impl Mutate<PathBuf> for PathBufMutator {
     #[inline]
+    fn mutation_count(&self, value: &PathBuf, shrink: bool) -> core::option::Option<u32> {
+        let mut count = 0u32;
+        // Push a random path component.
+        count += !shrink as u32;
+        // Pop a component.
+        count += value.parent().is_some() as u32;
+        // Set a random extension.
+        count += 1;
+        Some(count)
+    }
+
+    #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut PathBuf) -> Result<()> {
         // Push a random path component.
         if !c.shrink() {

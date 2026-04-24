@@ -50,6 +50,15 @@ where
     fn mutate(&mut self, c: &mut Candidates, value: &mut core::cell::RefCell<T>) -> Result<()> {
         self.mutator.mutate(c, value.get_mut())
     }
+
+    #[inline]
+    fn mutation_count(
+        &self,
+        value: &core::cell::RefCell<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
+        self.mutator.mutation_count(&*value.borrow(), shrink)
+    }
 }
 
 impl<M, T> Generate<core::cell::RefCell<T>> for RefCell<M>

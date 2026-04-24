@@ -329,45 +329,38 @@ impl Context {
         mutator: &mut (impl Mutate<T> + ?Sized),
         value: &mut T,
     ) -> Result<()> {
-        self.choose_and_apply_mutation(value, |c, value| mutator.mutate(c, value))
+        if let Some(count) = mutator.mutation_count(value, self.shrink) {
+            self.apply_mutation(value, count, |c, value| mutator.mutate(c, value))
+        } else {
+            self.choose_and_apply_mutation(value, |c, value| mutator.mutate(c, value))
+        }
     }
 
-    fn choose_and_apply_mutation<T>(
+    fn apply_mutation<T>(
         &mut self,
         value: &mut T,
+        count: u32,
         mut mutate_impl: impl FnMut(&mut Candidates, &mut T) -> Result<()>,
     ) -> Result<()> {
-        log::trace!("=== choosing an applying a mutation ===");
+        log::trace!("=== applying mutation (fast path, count={count}) ===");
 
-        // Count how many mutations we *could* perform.
-        let mut candidates = Candidates {
-            context: self,
-            phase: Phase::Count(0),
-            applied_mutation: false,
-        };
-        mutate_impl(&mut candidates, value)?;
+        let count_usize = usize::try_from(count).unwrap();
 
-        let count = match candidates.phase {
-            Phase::Count(count) => usize::try_from(count).unwrap(),
-            Phase::Mutate { .. } => unreachable!(),
-        };
-        log::trace!("counted {count} mutations");
-
-        if count == 0 {
+        if count_usize == 0 {
             log::trace!("mutator exhausted");
             return Err(Error::exhausted());
         }
 
-        // Choose a random target mutation to actually perform.
-        let target = candidates.context.rng().gen_index(count).unwrap();
+        let target = self.rng().gen_index(count_usize).unwrap();
         log::trace!("targeting mutation {target}");
-        debug_assert!(target < count);
+        debug_assert!(target < count_usize);
 
-        // Perform the chosen target mutation.
-        candidates.phase = Phase::Mutate {
-            current: 0,
-            target: u32::try_from(target).unwrap(),
+        let mut candidates = Candidates {
+            context: self,
+            phase: Phase::mutate(u32::try_from(target).unwrap()),
+            applied_mutation: false,
         };
+
         match mutate_impl(&mut candidates, value) {
             Err(e) if e.is_early_exit() => {
                 log::trace!("mutation applied successfully");
@@ -379,35 +372,44 @@ impl Context {
                 Err(e)
             }
 
-            // We should have found the target mutation, applied it, and then
-            // broken out of mutation enumeration by returning an early-exit
-            // error. So either we are facing a nondeterministic mutation
-            // enumeration or a mutator is missing a `?` and is failing to
-            // propagate the early-exit error to us. Differentiate between these
-            // two cases via the `applied_mutation` flag.
             Ok(()) if candidates.applied_mutation => {
                 panic!(
                     "We applied a mutation but did not receive an early-exit error \
                      from the mutator. This means that errors are not always being \
                      propagated, for example a `?` is missing from a call to the \
-                     `Candidates::mutation` method. Errors must be propagated \
-                     in `Mutate::mutate` et al method implementations; failure to do \
-                     so can lead to bugs, panics, and degraded performance.",
+                     `Candidates::mutation` method.",
                 )
             }
             Ok(()) => {
-                let current = match candidates.phase {
-                    Phase::Mutate { current, .. } => current,
-                    _ => unreachable!(),
-                };
+                let found = candidates.phase.current;
                 panic!(
-                    "Nondeterministic mutator implementation: did not enumerate the \
-                     same set of mutations when given the same value! Counted {count} \
-                     mutations in the first pass, but only found {current} mutations on \
-                     the second pass. Mutators must be deterministic.",
+                    "Mutation count mismatch: expected {count} candidates but \
+                     mutate only enumerated {found}. Ensure mutation_count and \
+                     mutate agree, and that mutate is deterministic.",
                 )
             }
         }
+    }
+
+    fn choose_and_apply_mutation<T>(
+        &mut self,
+        value: &mut T,
+        mut mutate_impl: impl FnMut(&mut Candidates, &mut T) -> Result<()>,
+    ) -> Result<()> {
+        log::trace!("=== choosing and applying a mutation ===");
+
+        let count = {
+            let mut candidates = Candidates {
+                context: self,
+                phase: Phase::counting(),
+                applied_mutation: false,
+            };
+            mutate_impl(&mut candidates, value)?;
+            candidates.phase.current
+        };
+        log::trace!("counted {count} mutations");
+
+        self.apply_mutation(value, count, mutate_impl)
     }
 
     #[inline]
@@ -437,10 +439,34 @@ impl Context {
     }
 }
 
-#[derive(Clone, Copy)]
-enum Phase {
-    Count(u32),
-    Mutate { current: u32, target: u32 },
+// Logically this is
+//
+//     enum Phase {
+//         Count(u32),
+//         Mutate { current: u32, target: u32 },
+//     }
+//
+// but we avoid the `enum` for performance.
+#[derive(Clone)]
+struct Phase {
+    current: u32,
+
+    // `u32::MAX` means we're in counting mode, and do not have target mutation
+    // to apply.
+    target: u32,
+}
+
+impl Phase {
+    fn counting() -> Self {
+        Phase {
+            current: 0,
+            target: u32::MAX,
+        }
+    }
+
+    fn mutate(target: u32) -> Self {
+        Phase { current: 0, target }
+    }
 }
 
 /// The set of mutations that can be applied to a value.
@@ -469,26 +495,85 @@ impl<'a> Candidates<'a> {
     /// information on this method's use.
     #[inline]
     pub fn mutation(&mut self, mut f: impl FnMut(&mut Context) -> Result<()>) -> Result<()> {
-        match &mut self.phase {
-            Phase::Count(count) => {
-                *count += 1;
-                Ok(())
-            }
-            Phase::Mutate { current, target } => {
-                assert!(
-                    *current <= *target,
-                    "{current} <= {target}; did you forget to `?`-propagate the \
-                     result of a `Candidates::mutation` call?",
-                );
-                if *current == *target {
-                    self.applied_mutation = true;
-                    f(&mut self.context)?;
-                    Err(Error::early_exit())
-                } else {
-                    *current += 1;
-                    Ok(())
-                }
-            }
+        let idx = self.phase.current;
+        self.phase.current = idx + 1;
+        if idx == self.phase.target {
+            self.applied_mutation = true;
+            f(&mut self.context)?;
+            Err(Error::early_exit())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Register `count` candidate mutations as a group.
+    ///
+    /// During counting, this increments the candidate counter by `count` in a
+    /// single step. During mutation, if the chosen target falls within this
+    /// group, `f` is called with the offset within the group (`0..count`).
+    ///
+    /// This is useful when you have many related mutations (such as enum
+    /// variant switches) that can be dispatched by index rather than
+    /// registered one at a time via [`mutation`][Candidates::mutation].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn foo() -> mutatis::Result<()> {
+    /// use mutatis::{Candidates, Mutate, Result, Session};
+    ///
+    /// #[derive(Clone, Copy, Debug, PartialEq)]
+    /// enum Direction { North, South, East, West }
+    ///
+    /// struct DirectionMutator;
+    ///
+    /// impl Mutate<Direction> for DirectionMutator {
+    ///     fn mutate(
+    ///         &mut self,
+    ///         mutations: &mut Candidates<'_>,
+    ///         value: &mut Direction,
+    ///     ) -> Result<()> {
+    ///         // Register three variant-switch mutations (all directions
+    ///         // other than the current one) in a single call.
+    ///         let current = *value as u32;
+    ///         mutations.mutation_group(3, |_ctx, which| {
+    ///             let target = if which >= current { which + 1 } else { which };
+    ///             *value = match target {
+    ///                 0 => Direction::North,
+    ///                 1 => Direction::South,
+    ///                 2 => Direction::East,
+    ///                 _ => Direction::West,
+    ///             };
+    ///             Ok(())
+    ///         })?;
+    ///         Ok(())
+    ///     }
+    /// }
+    ///
+    /// let mut direction = Direction::North;
+    /// let mut session = Session::new();
+    /// for _ in 0..5 {
+    ///     session.mutate_with(&mut DirectionMutator, &mut direction)?;
+    ///     println!("direction is now {direction:?}");
+    /// }
+    /// # Ok(())
+    /// # }
+    /// # foo().unwrap();
+    /// ```
+    #[inline]
+    pub fn mutation_group(
+        &mut self,
+        count: u32,
+        f: impl FnOnce(&mut Context, u32) -> Result<()>,
+    ) -> Result<()> {
+        let base = self.phase.current;
+        self.phase.current = base + count;
+        if self.phase.target.wrapping_sub(base) < count {
+            self.applied_mutation = true;
+            f(&mut self.context, self.phase.target - base)?;
+            Err(Error::early_exit())
+        } else {
+            Ok(())
         }
     }
 
@@ -755,6 +840,19 @@ where
     /// # foo().unwrap();
     /// ```
     fn mutate(&mut self, mutations: &mut Candidates<'_>, value: &mut T) -> Result<()>;
+
+    /// Return the number of mutations that [`mutate`][Mutate::mutate] would
+    /// register for the given `value`.
+    ///
+    /// The default implementation returns `u32::MAX`, which signals that the
+    /// count is unknown and the framework should fall back to a counting pass
+    /// through [`mutate`][Mutate::mutate]. Implementations that can compute
+    /// the count cheaply should override this method.
+    #[inline]
+    fn mutation_count(&self, value: &T, shrink: bool) -> Option<u32> {
+        let _ = (value, shrink);
+        None
+    }
 
     // Provided methods.
 
@@ -1100,6 +1198,448 @@ where
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // With a decision-tree approach like:
+    //   if random() { A } else if random() { B } else if random() { C } else { D }
+    // we'd get A=50%, B=25%, C=12.5%, D=12.5%.
+    // Mutatis gathers all candidates first and picks uniformly, so each should be ~25%.
+    //
+    // Expected count per variant is ITERS/4 = 2500. Tolerance of 5% (500 counts)
+    // is >11 standard deviations from the mean for a correct uniform distribution,
+    // so false failures are essentially impossible.
+    const ITERS: usize = 10_000;
+    const EXPECTED: usize = ITERS / 4;
+    const TOLERANCE: usize = ITERS / 20;
+
+    fn assert_uniform(counts: &[usize; 4], label: &str) {
+        for (i, &count) in counts.iter().enumerate() {
+            assert!(
+                count.abs_diff(EXPECTED) <= TOLERANCE,
+                "{label} {i} was chosen {count} times (expected ~{EXPECTED}, \
+                 tolerance ±{TOLERANCE}); mutation distribution is not uniform",
+            );
+        }
+    }
+
+    // ---- Flat enum ----
+
+    #[derive(Clone, Copy)]
+    enum FourVariants {
+        A,
+        B,
+        C,
+        D,
+    }
+
+    struct FourVariantsMutator;
+
+    impl Mutate<FourVariants> for FourVariantsMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut FourVariants) -> Result<()> {
+            c.mutation(|_| {
+                *value = FourVariants::A;
+                Ok(())
+            })?;
+            c.mutation(|_| {
+                *value = FourVariants::B;
+                Ok(())
+            })?;
+            c.mutation(|_| {
+                *value = FourVariants::C;
+                Ok(())
+            })?;
+            c.mutation(|_| {
+                *value = FourVariants::D;
+                Ok(())
+            })?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn enum_mutation_is_uniform() {
+        let mut session = Session::new();
+        let mut value = FourVariants::A;
+        let mut counts = [0usize; 4];
+        let mut mutator = FourVariantsMutator;
+
+        for _ in 0..ITERS {
+            session.mutate_with(&mut mutator, &mut value).unwrap();
+            counts[match value {
+                FourVariants::A => 0,
+                FourVariants::B => 1,
+                FourVariants::C => 2,
+                FourVariants::D => 3,
+            }] += 1;
+        }
+
+        assert_uniform(&counts, "variant");
+    }
+
+    // ---- Flat struct with four bool fields ----
+
+    struct FourFields {
+        a: bool,
+        b: bool,
+        c: bool,
+        d: bool,
+    }
+
+    #[derive(Default)]
+    struct FourFieldsMutator {
+        a: mutators::Bool,
+        b: mutators::Bool,
+        c: mutators::Bool,
+        d: mutators::Bool,
+    }
+
+    impl Mutate<FourFields> for FourFieldsMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut FourFields) -> Result<()> {
+            self.a.mutate(c, &mut value.a)?;
+            self.b.mutate(c, &mut value.b)?;
+            self.c.mutate(c, &mut value.c)?;
+            self.d.mutate(c, &mut value.d)?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn struct_mutation_is_uniform() {
+        let mut session = Session::new();
+        let mut mutator = FourFieldsMutator::default();
+        let mut counts = [0usize; 4];
+
+        for _ in 0..ITERS {
+            let mut value = FourFields {
+                a: false,
+                b: false,
+                c: false,
+                d: false,
+            };
+            session.mutate_with(&mut mutator, &mut value).unwrap();
+            if value.a {
+                counts[0] += 1;
+            }
+            if value.b {
+                counts[1] += 1;
+            }
+            if value.c {
+                counts[2] += 1;
+            }
+            if value.d {
+                counts[3] += 1;
+            }
+        }
+
+        assert_uniform(&counts, "field");
+    }
+
+    // ---- Nested structs: Abcd { a, bcd: Bcd { b, cd: Cd { c, d } } } ----
+
+    struct NestedAbcd {
+        a: bool,
+        bcd: NestedBcd,
+    }
+
+    struct NestedBcd {
+        b: bool,
+        cd: NestedCd,
+    }
+
+    struct NestedCd {
+        c: bool,
+        d: bool,
+    }
+
+    #[derive(Default)]
+    struct NestedCdMutator {
+        c: mutators::Bool,
+        d: mutators::Bool,
+    }
+
+    #[derive(Default)]
+    struct NestedBcdMutator {
+        b: mutators::Bool,
+        cd: NestedCdMutator,
+    }
+
+    #[derive(Default)]
+    struct NestedAbcdMutator {
+        a: mutators::Bool,
+        bcd: NestedBcdMutator,
+    }
+
+    impl Mutate<NestedCd> for NestedCdMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut NestedCd) -> Result<()> {
+            self.c.mutate(c, &mut value.c)?;
+            self.d.mutate(c, &mut value.d)?;
+            Ok(())
+        }
+    }
+
+    impl Mutate<NestedBcd> for NestedBcdMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut NestedBcd) -> Result<()> {
+            self.b.mutate(c, &mut value.b)?;
+            self.cd.mutate(c, &mut value.cd)?;
+            Ok(())
+        }
+    }
+
+    impl Mutate<NestedAbcd> for NestedAbcdMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut NestedAbcd) -> Result<()> {
+            self.a.mutate(c, &mut value.a)?;
+            self.bcd.mutate(c, &mut value.bcd)?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn nested_struct_mutation_is_uniform() {
+        let mut session = Session::new();
+        let mut mutator = NestedAbcdMutator::default();
+        let mut counts = [0usize; 4];
+
+        for _ in 0..ITERS {
+            let mut value = NestedAbcd {
+                a: false,
+                bcd: NestedBcd {
+                    b: false,
+                    cd: NestedCd { c: false, d: false },
+                },
+            };
+            session.mutate_with(&mut mutator, &mut value).unwrap();
+            if value.a {
+                counts[0] += 1;
+            }
+            if value.bcd.b {
+                counts[1] += 1;
+            }
+            if value.bcd.cd.c {
+                counts[2] += 1;
+            }
+            if value.bcd.cd.d {
+                counts[3] += 1;
+            }
+        }
+
+        assert_uniform(&counts, "field");
+    }
+
+    // ---- Nested enums: Abcd { A, Bcd(Bcd { B, Cd(Cd { C, D }) }) } ----
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum EnumAbcd {
+        A,
+        Bcd(EnumBcd),
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum EnumBcd {
+        B,
+        Cd(EnumCd),
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum EnumCd {
+        C,
+        D,
+    }
+
+    struct EnumCdMutator;
+
+    impl Mutate<EnumCd> for EnumCdMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut EnumCd) -> Result<()> {
+            c.mutation(|_| {
+                *value = EnumCd::C;
+                Ok(())
+            })?;
+            c.mutation(|_| {
+                *value = EnumCd::D;
+                Ok(())
+            })?;
+            Ok(())
+        }
+    }
+
+    struct EnumBcdMutator {
+        cd: EnumCdMutator,
+    }
+
+    impl Mutate<EnumBcd> for EnumBcdMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut EnumBcd) -> Result<()> {
+            c.mutation(|_| {
+                *value = EnumBcd::B;
+                Ok(())
+            })?;
+            match value {
+                EnumBcd::B => {
+                    c.mutation(|_| {
+                        *value = EnumBcd::Cd(EnumCd::C);
+                        Ok(())
+                    })?;
+                    c.mutation(|_| {
+                        *value = EnumBcd::Cd(EnumCd::D);
+                        Ok(())
+                    })?;
+                }
+                EnumBcd::Cd(cd) => {
+                    self.cd.mutate(c, cd)?;
+                }
+            }
+            Ok(())
+        }
+    }
+
+    struct EnumAbcdMutator {
+        bcd: EnumBcdMutator,
+    }
+
+    impl Mutate<EnumAbcd> for EnumAbcdMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut EnumAbcd) -> Result<()> {
+            c.mutation(|_| {
+                *value = EnumAbcd::A;
+                Ok(())
+            })?;
+            match value {
+                EnumAbcd::A => {
+                    c.mutation(|_| {
+                        *value = EnumAbcd::Bcd(EnumBcd::B);
+                        Ok(())
+                    })?;
+                    c.mutation(|_| {
+                        *value = EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::C));
+                        Ok(())
+                    })?;
+                    c.mutation(|_| {
+                        *value = EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::D));
+                        Ok(())
+                    })?;
+                }
+                EnumAbcd::Bcd(bcd) => {
+                    self.bcd.mutate(c, bcd)?;
+                }
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn nested_enum_mutation_is_uniform() {
+        let mut session = Session::new();
+        let mut mutator = EnumAbcdMutator {
+            bcd: EnumBcdMutator { cd: EnumCdMutator },
+        };
+        let mut counts = [0usize; 4];
+
+        for _ in 0..ITERS {
+            let mut value = EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::D));
+            session.mutate_with(&mut mutator, &mut value).unwrap();
+            counts[match value {
+                EnumAbcd::A => 0,
+                EnumAbcd::Bcd(EnumBcd::B) => 1,
+                EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::C)) => 2,
+                EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::D)) => 3,
+            }] += 1;
+        }
+
+        assert_uniform(&counts, "variant");
+    }
+
+    // ---- mutation_group with four alternatives ----
+
+    #[derive(Clone, Copy)]
+    enum FourGroupAlts {
+        A,
+        B,
+        C,
+        D,
+    }
+
+    struct FourGroupAltsMutator;
+
+    impl Mutate<FourGroupAlts> for FourGroupAltsMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut FourGroupAlts) -> Result<()> {
+            c.mutation_group(4, |_ctx, which| {
+                *value = match which {
+                    0 => FourGroupAlts::A,
+                    1 => FourGroupAlts::B,
+                    2 => FourGroupAlts::C,
+                    _ => FourGroupAlts::D,
+                };
+                Ok(())
+            })?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn mutation_group_is_uniform() {
+        let mut session = Session::new();
+        let mut value = FourGroupAlts::A;
+        let mut counts = [0usize; 4];
+        let mut mutator = FourGroupAltsMutator;
+
+        for _ in 0..ITERS {
+            session.mutate_with(&mut mutator, &mut value).unwrap();
+            counts[match value {
+                FourGroupAlts::A => 0,
+                FourGroupAlts::B => 1,
+                FourGroupAlts::C => 2,
+                FourGroupAlts::D => 3,
+            }] += 1;
+        }
+
+        assert_uniform(&counts, "mutation_group alt");
+    }
+
+    // ---- mutation_group mixed with individual mutations ----
+
+    struct MixedGroupMutator;
+
+    impl Mutate<FourGroupAlts> for MixedGroupMutator {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut FourGroupAlts) -> Result<()> {
+            c.mutation_group(2, |_ctx, which| {
+                *value = match which {
+                    0 => FourGroupAlts::A,
+                    _ => FourGroupAlts::B,
+                };
+                Ok(())
+            })?;
+            c.mutation(|_ctx| {
+                *value = FourGroupAlts::C;
+                Ok(())
+            })?;
+            c.mutation(|_ctx| {
+                *value = FourGroupAlts::D;
+                Ok(())
+            })?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn mutation_group_mixed_with_individual_is_uniform() {
+        let mut session = Session::new();
+        let mut value = FourGroupAlts::A;
+        let mut counts = [0usize; 4];
+        let mut mutator = MixedGroupMutator;
+
+        for _ in 0..ITERS {
+            session.mutate_with(&mut mutator, &mut value).unwrap();
+            counts[match value {
+                FourGroupAlts::A => 0,
+                FourGroupAlts::B => 1,
+                FourGroupAlts::C => 2,
+                FourGroupAlts::D => 3,
+            }] += 1;
+        }
+
+        assert_uniform(&counts, "mixed group alt");
+    }
+}
+
 fn _static_assert_object_safety(
     _: &dyn Mutate<u8>,
     _: &dyn Generate<u8>,
@@ -1113,6 +1653,11 @@ where
 {
     fn mutate(&mut self, c: &mut Candidates, value: &mut T) -> Result<()> {
         (**self).mutate(c, value)
+    }
+
+    #[inline]
+    fn mutation_count(&self, value: &T, shrink: bool) -> Option<u32> {
+        (**self).mutation_count(value, shrink)
     }
 }
 

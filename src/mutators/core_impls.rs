@@ -62,6 +62,11 @@ impl Mutate<bool> for Bool {
         }
         Ok(())
     }
+
+    #[inline]
+    fn mutation_count(&self, value: &bool, shrink: bool) -> core::option::Option<u32> {
+        Some(if !shrink || *value { 1 } else { 0 })
+    }
 }
 
 impl Generate<bool> for Bool {
@@ -131,6 +136,11 @@ macro_rules! ints {
                         };
                         Ok(())
                     })
+                }
+
+                #[inline]
+                fn mutation_count(&self, value: &$ty, shrink: bool) -> core::option::Option<u32> {
+                    Some(if shrink && *value == 0 { 0 } else { 1 })
                 }
             }
 
@@ -236,6 +246,11 @@ pub fn char() -> Char {
 }
 
 impl Mutate<char> for Char {
+    #[inline]
+    fn mutation_count(&self, value: &char, shrink: bool) -> core::option::Option<u32> {
+        Some(if shrink { (*value != '\0') as u32 } else { 8 })
+    }
+
     #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut char) -> Result<()> {
         if c.shrink() {
@@ -373,6 +388,11 @@ pub fn ascii_char() -> AsciiChar {
 
 impl Mutate<char> for AsciiChar {
     #[inline]
+    fn mutation_count(&self, value: &char, shrink: bool) -> core::option::Option<u32> {
+        Some(if shrink { (*value != '\0') as u32 } else { 1 })
+    }
+
+    #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut char) -> Result<()> {
         if c.shrink() {
             if *value != '\0' {
@@ -441,6 +461,21 @@ pub fn f32() -> F32 {
 }
 
 impl Mutate<f32> for F32 {
+    #[inline]
+    fn mutation_count(&self, value: &f32, shrink: bool) -> core::option::Option<u32> {
+        Some(if shrink {
+            if *value == 0.0 {
+                0
+            } else if value.is_nan() || value.is_infinite() {
+                9
+            } else {
+                1
+            }
+        } else {
+            12
+        })
+    }
+
     #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut f32) -> Result<()> {
         let special_finite = |c: &mut Candidates, value: &mut f32| -> Result<()> {
@@ -537,6 +572,21 @@ pub fn f64() -> F64 {
 }
 
 impl Mutate<f64> for F64 {
+    #[inline]
+    fn mutation_count(&self, value: &f64, shrink: bool) -> core::option::Option<u32> {
+        Some(if shrink {
+            if *value == 0.0 {
+                0
+            } else if value.is_nan() || value.is_infinite() {
+                9
+            } else {
+                1
+            }
+        } else {
+            12
+        })
+    }
+
     #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut f64) -> Result<()> {
         let special_finite = |c: &mut Candidates, value: &mut f64| -> Result<()> {
@@ -651,6 +701,15 @@ macro_rules! tuples {
                     )*
                     Ok(())
                 }
+
+                #[inline]
+                fn mutation_count(
+                    &self,
+                    ( $( $t , )* ): &( $( $t , )* ),
+                    _shrink: bool,
+                ) -> core::option::Option<u32> {
+                    Some(0 $( + self.$m.mutation_count($t, _shrink)? )*)
+                }
             }
 
             #[allow(non_snake_case)]
@@ -733,6 +792,11 @@ impl Mutate<()> for Unit {
     fn mutate(&mut self, _c: &mut Candidates, _value: &mut ()) -> Result<()> {
         Ok(())
     }
+
+    #[inline]
+    fn mutation_count(&self, _value: &(), _shrink: bool) -> core::option::Option<u32> {
+        Some(0)
+    }
 }
 
 impl Generate<()> for Unit {
@@ -784,6 +848,15 @@ where
             self.mutator.mutate(c, element)?;
         }
         Ok(())
+    }
+
+    #[inline]
+    fn mutation_count(&self, value: &[T; N], shrink: bool) -> core::option::Option<u32> {
+        let mut count = 0u32;
+        for element in value.iter() {
+            count += self.mutator.mutation_count(element, shrink)?;
+        }
+        Some(count)
     }
 }
 

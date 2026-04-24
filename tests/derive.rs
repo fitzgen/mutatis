@@ -4,6 +4,200 @@ use std::unreachable;
 
 use mutatis::{error::ResultExt, mutators as m, DefaultMutate, Generate, Mutate, Session};
 
+// With a decision-tree approach like:
+//   if random() { A } else if random() { B } else if random() { C } else { D }
+// we'd get A=50%, B=25%, C=12.5%, D=12.5%.
+// Mutatis gathers all candidates first and picks uniformly.
+//
+// Tolerance of 5% is >10 standard deviations from the mean for any of these
+// sample sizes, so false failures are essentially impossible.
+const ITERS: usize = 10_000;
+
+fn assert_uniform(counts: &[usize], total: usize, label: &str) {
+    let n = counts.len();
+    let expected = total / n;
+    let tolerance = total / 20;
+    for (i, &count) in counts.iter().enumerate() {
+        assert!(
+            count.abs_diff(expected) <= tolerance,
+            "{label} {i} was chosen {count} times (expected ~{expected}, \
+             tolerance ±{tolerance}); mutation distribution is not uniform",
+        );
+    }
+}
+
+// ---- Flat enum with derive ----
+
+#[derive(Clone, Copy, Mutate)]
+enum FourVariants {
+    A,
+    B,
+    C,
+    D,
+}
+
+#[test]
+fn derive_enum_mutation_is_uniform() {
+    let mut session = Session::new();
+    let mut value = FourVariants::A;
+    let mut counts = [0usize; 4];
+
+    for _ in 0..ITERS {
+        session.mutate(&mut value).unwrap();
+        counts[match value {
+            FourVariants::A => 0,
+            FourVariants::B => 1,
+            FourVariants::C => 2,
+            FourVariants::D => 3,
+        }] += 1;
+    }
+
+    assert_uniform(&counts, ITERS, "variant");
+}
+
+// ---- Flat struct with derive ----
+
+#[derive(Mutate)]
+struct FourFields {
+    a: bool,
+    b: bool,
+    c: bool,
+    d: bool,
+}
+
+#[test]
+fn derive_struct_mutation_is_uniform() {
+    let mut session = Session::new();
+    let mut counts = [0usize; 4];
+
+    for _ in 0..ITERS {
+        let mut value = FourFields {
+            a: false,
+            b: false,
+            c: false,
+            d: false,
+        };
+        session.mutate(&mut value).unwrap();
+        if value.a {
+            counts[0] += 1;
+        }
+        if value.b {
+            counts[1] += 1;
+        }
+        if value.c {
+            counts[2] += 1;
+        }
+        if value.d {
+            counts[3] += 1;
+        }
+    }
+
+    assert_uniform(&counts, ITERS, "field");
+}
+
+// ---- Nested structs with derive ----
+
+#[derive(Mutate)]
+struct NestedAbcd {
+    a: bool,
+    bcd: NestedBcd,
+}
+
+#[derive(Mutate)]
+struct NestedBcd {
+    b: bool,
+    cd: NestedCd,
+}
+
+#[derive(Mutate)]
+struct NestedCd {
+    c: bool,
+    d: bool,
+}
+
+#[test]
+fn derive_nested_struct_mutation_is_uniform() {
+    let mut session = Session::new();
+    let mut counts = [0usize; 4];
+
+    for _ in 0..ITERS {
+        let mut value = NestedAbcd {
+            a: false,
+            bcd: NestedBcd {
+                b: false,
+                cd: NestedCd { c: false, d: false },
+            },
+        };
+        session.mutate(&mut value).unwrap();
+        if value.a {
+            counts[0] += 1;
+        }
+        if value.bcd.b {
+            counts[1] += 1;
+        }
+        if value.bcd.cd.c {
+            counts[2] += 1;
+        }
+        if value.bcd.cd.d {
+            counts[3] += 1;
+        }
+    }
+
+    assert_uniform(&counts, ITERS, "field");
+}
+
+// ---- Nested enums with derive ----
+//
+// The derive macro registers one variant-switch mutation per *non-current*
+// variant, then delegates to the current variant's field mutators. Starting
+// from Abcd::Bcd(Bcd::Cd(Cd::D)), the candidates are:
+//   - switch Abcd to A  (from AbcdMutator)
+//   - switch Bcd to B   (from BcdMutator, delegated through AbcdMutator)
+//   - switch Cd to C    (from CdMutator, delegated through Bcd and Abcd)
+// That's 3 candidates, each chosen uniformly at ~33%. A naive decision tree
+// would give A=50%, B=25%, C=25%.
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Mutate)]
+enum EnumAbcd {
+    A,
+    Bcd(EnumBcd),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Mutate)]
+enum EnumBcd {
+    B,
+    Cd(EnumCd),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Mutate)]
+enum EnumCd {
+    C,
+    D,
+}
+
+#[test]
+fn derive_nested_enum_mutation_is_uniform() {
+    let mut session = Session::new();
+    let mut counts = [0usize; 3];
+
+    for _ in 0..ITERS {
+        let mut value = EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::D));
+        session.mutate(&mut value).unwrap();
+        counts[match value {
+            EnumAbcd::A => 0,
+            EnumAbcd::Bcd(EnumBcd::B) => 1,
+            EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::C)) => 2,
+            EnumAbcd::Bcd(EnumBcd::Cd(EnumCd::D)) => {
+                panic!(
+                    "should not stay at D; the derive mutator switches away from current variant"
+                )
+            }
+        }] += 1;
+    }
+
+    assert_uniform(&counts, ITERS, "variant");
+}
+
 #[test]
 fn derive_on_struct_with_named_fields() -> anyhow::Result<()> {
     #[derive(Debug, Default, Mutate)]

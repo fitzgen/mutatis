@@ -50,6 +50,20 @@ where
         self.mutator.mutate(c, &mut value.end)?;
         Ok(())
     }
+
+    #[inline]
+    fn mutation_count(
+        &self,
+        value: &core::ops::Range<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
+        let mut count = 0u32;
+        // Mutate start.
+        count += self.mutator.mutation_count(&value.start, shrink)?;
+        // Mutate end.
+        count += self.mutator.mutation_count(&value.end, shrink)?;
+        Some(count)
+    }
 }
 
 impl<M, T> Generate<core::ops::Range<T>> for Range<M>
@@ -121,6 +135,15 @@ where
     fn mutate(&mut self, c: &mut Candidates, value: &mut core::ops::RangeFrom<T>) -> Result<()> {
         self.mutator.mutate(c, &mut value.start)
     }
+
+    #[inline]
+    fn mutation_count(
+        &self,
+        value: &core::ops::RangeFrom<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
+        self.mutator.mutation_count(&value.start, shrink)
+    }
 }
 
 impl<M, T> Generate<core::ops::RangeFrom<T>> for RangeFrom<M>
@@ -188,6 +211,16 @@ where
     M: Mutate<T>,
     T: Default + Clone,
 {
+    #[inline]
+    fn mutation_count(
+        &self,
+        _value: &core::ops::RangeInclusive<T>,
+        _shrink: bool,
+    ) -> core::option::Option<u32> {
+        // Mutate start + mutate end.
+        Some(2)
+    }
+
     #[inline]
     fn mutate(
         &mut self,
@@ -282,6 +315,15 @@ where
     fn mutate(&mut self, c: &mut Candidates, value: &mut core::ops::RangeTo<T>) -> Result<()> {
         self.mutator.mutate(c, &mut value.end)
     }
+
+    #[inline]
+    fn mutation_count(
+        &self,
+        value: &core::ops::RangeTo<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
+        self.mutator.mutation_count(&value.end, shrink)
+    }
 }
 
 impl<M, T> Generate<core::ops::RangeTo<T>> for RangeTo<M>
@@ -354,6 +396,15 @@ where
     ) -> Result<()> {
         self.mutator.mutate(c, &mut value.end)
     }
+
+    #[inline]
+    fn mutation_count(
+        &self,
+        value: &core::ops::RangeToInclusive<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
+        self.mutator.mutation_count(&value.end, shrink)
+    }
 }
 
 impl<M, T> Generate<core::ops::RangeToInclusive<T>> for RangeToInclusive<M>
@@ -420,6 +471,44 @@ impl<M, T> Mutate<core::ops::Bound<T>> for Bound<M>
 where
     M: Generate<T>,
 {
+    #[inline]
+    fn mutation_count(
+        &self,
+        value: &core::ops::Bound<T>,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
+        match value {
+            core::ops::Bound::Included(v) => {
+                let mut count = 0u32;
+                // Mutate inner value.
+                count += self.mutator.mutation_count(v, shrink)?;
+                // Generate Excluded.
+                count += !shrink as u32;
+                // Set to Unbounded.
+                count += 1;
+                Some(count)
+            }
+            core::ops::Bound::Excluded(v) => {
+                let mut count = 0u32;
+                // Mutate inner value.
+                count += self.mutator.mutation_count(v, shrink)?;
+                // Generate Included.
+                count += 1;
+                // Set to Unbounded.
+                count += 1;
+                Some(count)
+            }
+            core::ops::Bound::Unbounded => {
+                let mut count = 0u32;
+                // Generate Included.
+                count += 1;
+                // Generate Excluded.
+                count += !shrink as u32;
+                Some(count)
+            }
+        }
+    }
+
     #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut core::ops::Bound<T>) -> Result<()> {
         match value {

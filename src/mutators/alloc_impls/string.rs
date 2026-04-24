@@ -45,6 +45,28 @@ where
     C: Generate<char>,
 {
     #[inline]
+    fn mutation_count(
+        &self,
+        value: &alloc::string::String,
+        shrink: bool,
+    ) -> core::option::Option<u32> {
+        let mut count = 0u32;
+        // Remove a random character.
+        count += !value.is_empty() as u32;
+        // Truncate.
+        count += !value.is_empty() as u32;
+        // Replace a random character.
+        count += !value.is_empty() as u32;
+        // Insert a random character at a random position.
+        count += !shrink as u32;
+        // Append a character.
+        count += !shrink as u32;
+        // Push multiple random characters.
+        count += !shrink as u32;
+        Some(count)
+    }
+
+    #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut alloc::string::String) -> Result<()> {
         // Remove a random character.
         if !value.is_empty() {

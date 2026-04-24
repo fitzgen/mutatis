@@ -47,6 +47,11 @@ where
     M: Mutate<T>,
 {
     #[inline]
+    fn mutation_count(&self, value: &Mutex<T>, shrink: bool) -> core::option::Option<u32> {
+        self.mutator.mutation_count(&*value.lock().unwrap(), shrink)
+    }
+
+    #[inline]
     fn mutate(&mut self, c: &mut Candidates, value: &mut Mutex<T>) -> Result<()> {
         self.mutator.mutate(c, value.get_mut().unwrap())
     }

@@ -44,6 +44,15 @@ impl<T> Mutate<marker::PhantomData<T>> for PhantomDataMutator<T> {
     fn mutate(&mut self, _c: &mut Candidates, _value: &mut marker::PhantomData<T>) -> Result<()> {
         Ok(())
     }
+
+    #[inline]
+    fn mutation_count(
+        &self,
+        _value: &marker::PhantomData<T>,
+        _shrink: bool,
+    ) -> core::option::Option<u32> {
+        Some(0)
+    }
 }
 
 impl<T> Generate<marker::PhantomData<T>> for PhantomDataMutator<T> {

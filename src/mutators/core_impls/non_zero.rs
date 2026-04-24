@@ -70,6 +70,11 @@ macro_rules! non_zero {
                     })?;
                     Ok(())
                 }
+
+                #[inline]
+                fn mutation_count(&self, _value: &core::num::NonZero<$inner_ty>, _shrink: bool) -> core::option::Option<u32> {
+                    Some(1)
+                }
             }
 
             impl Generate<core::num::NonZero<$inner_ty>> for $ty_name {
