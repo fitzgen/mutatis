@@ -523,7 +523,7 @@ mod tests {
     #[test]
     fn check_run_with_fail_on_panic() {
         let result = check().run_with(m::bool(), [true], |_: &bool| -> Result<(), String> {
-            panic!("oh no!")
+            std::panic!("oh no!")
         });
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), CheckError::Failed(_)));

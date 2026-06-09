@@ -27,7 +27,7 @@ fn expand_derive_mutator(input: DeriveInput) -> Result<TokenStream> {
     let mutator_type_default_impl = gen_mutator_type_default_impl(&mutator_ty)?;
     let mutator_ctor = gen_mutator_ctor(&mutator_ty)?;
     let mutator_impl = gen_mutator_impl(&input, &mutator_ty)?;
-    let default_mutator_impl = gen_default_mutator_impl(&mutator_ty, &container_attrs)?;
+    let default_mutator_impl = gen_default_mutator_impl(&input, &mutator_ty, &container_attrs)?;
     let generate_impl = gen_generate_impl(&input, &mutator_ty, &container_attrs)?;
 
     Ok(quote! {
@@ -249,6 +249,21 @@ impl MutatorType {
                     bounds.push(quote! { #for_ty: mutatis::DefaultMutate });
                 }
             }
+            // Like `DefaultMutateBounds`, but additionally requires that each
+            // field's default mutator implements `Generate`. A multi-variant
+            // enum's `Mutate` impl performs variant switching via `generate`, so
+            // its `DefaultMutate` impl can only hold when the default mutators
+            // are themselves `Generate`. For concrete field types this is proven
+            // directly, but for generic parameters it must be stated explicitly.
+            WhereClauseKind::DefaultMutateAndGenerateBounds => {
+                for f in &self.mutator_fields {
+                    let for_ty = &f.for_ty;
+                    bounds.push(quote! { #for_ty: mutatis::DefaultMutate });
+                    bounds.push(quote! {
+                        <#for_ty as mutatis::DefaultMutate>::DefaultMutate: mutatis::Generate<#for_ty>
+                    });
+                }
+            }
         }
 
         if bounds.is_empty() {
@@ -303,6 +318,7 @@ enum WhereClauseKind {
     MutateAndGenerateBounds,
     DefaultBounds,
     DefaultMutateBounds,
+    DefaultMutateAndGenerateBounds,
 }
 
 #[derive(Clone, Copy)]
@@ -561,7 +577,14 @@ fn gen_mutator_ctor(mutator_ty: &MutatorType) -> Result<TokenStream> {
 fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<TokenStream> {
     let impl_generics = mutator_ty.mutator_impl_generics();
 
+    // The type name *with* generic arguments (e.g. `Foo<T>`). Valid only in type
+    // positions (the `impl`, method signatures).
     let ty_name = mutator_ty.ty_name_with_generics();
+
+    // The bare type name *without* generic arguments (e.g. `Foo`). Required in
+    // pattern and expression positions, where generic args would need turbofish
+    // syntax; Rust infers the type params from context instead.
+    let bare_ty_name = &mutator_ty.ty_name;
 
     let is_multi_variant_enum = matches!(&input.data, Data::Enum(data) if data.variants.len() > 1);
     let where_clause = if is_multi_variant_enum {
@@ -634,7 +657,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                             })
                             .collect::<Vec<_>>();
                         field_mutation_arms.push(quote! {
-                            #ty_name::#variant_ident { #( #patterns )* } => {
+                            #bare_ty_name::#variant_ident { #( #patterns )* } => {
                                 #( #mutates )*
                             }
                         });
@@ -658,7 +681,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                             })
                             .collect::<Vec<_>>();
                         field_mutation_arms.push(quote! {
-                            #ty_name::#variant_ident( #( #patterns )* ) => {
+                            #bare_ty_name::#variant_ident( #( #patterns )* ) => {
                                 #( #mutates )*
                             }
                         });
@@ -666,7 +689,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
 
                     Fields::Unit => {
                         field_mutation_arms.push(quote! {
-                            #ty_name::#variant_ident => {}
+                            #bare_ty_name::#variant_ident => {}
                         });
                     }
                 }
@@ -684,12 +707,12 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                         let variant_ident = &v.ident;
                         match &v.fields {
                             Fields::Named(_) => {
-                                quote! { #ty_name::#variant_ident { .. } => #v_idx, }
+                                quote! { #bare_ty_name::#variant_ident { .. } => #v_idx, }
                             }
                             Fields::Unnamed(_) => {
-                                quote! { #ty_name::#variant_ident(..) => #v_idx, }
+                                quote! { #bare_ty_name::#variant_ident(..) => #v_idx, }
                             }
-                            Fields::Unit => quote! { #ty_name::#variant_ident => #v_idx, },
+                            Fields::Unit => quote! { #bare_ty_name::#variant_ident => #v_idx, },
                         }
                     })
                     .collect();
@@ -721,7 +744,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                                 })
                                 .collect();
                             quote! {
-                                *value = #ty_name::#variant_ident { #( #field_exprs ),* };
+                                *value = #bare_ty_name::#variant_ident { #( #field_exprs ),* };
                             }
                         }
                         Fields::Unnamed(fields) => {
@@ -740,12 +763,12 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                                 })
                                 .collect();
                             quote! {
-                                *value = #ty_name::#variant_ident( #( #field_exprs ),* );
+                                *value = #bare_ty_name::#variant_ident( #( #field_exprs ),* );
                             }
                         }
                         Fields::Unit => {
                             quote! {
-                                *value = #ty_name::#variant_ident;
+                                *value = #bare_ty_name::#variant_ident;
                             }
                         }
                     };
@@ -900,7 +923,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                             }
                         }
                         count_arms.push(quote! {
-                            #ty_name::#variant_ident { #(#patterns)* } => {
+                            #bare_ty_name::#variant_ident { #(#patterns)* } => {
                                 #(#fld_counts)*
                             }
                         });
@@ -926,14 +949,14 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
                             }
                         }
                         count_arms.push(quote! {
-                            #ty_name::#variant_ident(#(#patterns)*) => {
+                            #bare_ty_name::#variant_ident(#(#patterns)*) => {
                                 #(#fld_counts)*
                             }
                         });
                     }
                     Fields::Unit => {
                         count_arms.push(quote! {
-                            #ty_name::#variant_ident => {}
+                            #bare_ty_name::#variant_ident => {}
                         });
                     }
                 }
@@ -976,6 +999,7 @@ fn gen_mutator_impl(input: &DeriveInput, mutator_ty: &MutatorType) -> Result<Tok
 }
 
 fn gen_default_mutator_impl(
+    input: &DeriveInput,
     mutator_ty: &MutatorType,
     container_attrs: &ContainerAttributes,
 ) -> Result<TokenStream> {
@@ -992,7 +1016,15 @@ fn gen_default_mutator_impl(
     };
 
     let ty_name = mutator_ty.ty_name_with_generics();
-    let where_clause = mutator_ty.where_clause(WhereClauseKind::DefaultMutateBounds);
+
+    // A multi-variant enum's `Mutate` impl switches variants via `generate`, so
+    // its `DefaultMutate` impl needs the field mutators to be `Generate` too.
+    let is_multi_variant_enum = matches!(&input.data, Data::Enum(data) if data.variants.len() > 1);
+    let where_clause = if is_multi_variant_enum {
+        mutator_ty.where_clause(WhereClauseKind::DefaultMutateAndGenerateBounds)
+    } else {
+        mutator_ty.where_clause(WhereClauseKind::DefaultMutateBounds)
+    };
     let mutator_name =
         &mutator_ty.mutator_name_with_generics(MutatorNameGenericsKind::JustTyGenerics);
 
@@ -1099,7 +1131,7 @@ fn gen_generate_impl(
                                         }
                                     })
                                     .collect();
-                                quote! { #ty_name::#variant_ident { #( #field_exprs ),* } }
+                                quote! { #bare_ty_name::#variant_ident { #( #field_exprs ),* } }
                             }
                             Fields::Unnamed(fields) => {
                                 let field_exprs: Vec<_> = fields
@@ -1117,10 +1149,10 @@ fn gen_generate_impl(
                                         }
                                     })
                                     .collect();
-                                quote! { #ty_name::#variant_ident( #( #field_exprs ),* ) }
+                                quote! { #bare_ty_name::#variant_ident( #( #field_exprs ),* ) }
                             }
                             Fields::Unit => {
-                                quote! { #ty_name::#variant_ident }
+                                quote! { #bare_ty_name::#variant_ident }
                             }
                         };
                         quote! { Some(#v_idx) => Ok(#construction), }

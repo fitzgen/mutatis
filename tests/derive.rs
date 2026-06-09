@@ -1,6 +1,6 @@
 #![cfg(all(feature = "derive", feature = "std"))]
 
-use std::unreachable;
+use std::{collections::HashSet, unreachable};
 
 use mutatis::{error::ResultExt, mutators as m, DefaultMutate, Generate, Mutate, Session};
 
@@ -577,5 +577,38 @@ fn generate_false_attribute() -> anyhow::Result<()> {
 
     let mut session = Session::new();
     let _value: NoGenerate = session.generate()?;
+    Ok(())
+}
+
+#[test]
+fn derive_mutate_on_generic_enum() -> anyhow::Result<()> {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Mutate)]
+    enum GenericEnum<T, U> {
+        Unit,
+        One(T),
+        Two { a: T, b: U },
+    }
+
+    let mut expected = HashSet::<GenericEnum<bool, bool>>::from_iter([
+        GenericEnum::Unit,
+        GenericEnum::One(false),
+        GenericEnum::One(true),
+        GenericEnum::Two { a: false, b: false },
+        GenericEnum::Two { a: false, b: true },
+        GenericEnum::Two { a: true, b: false },
+        GenericEnum::Two { a: true, b: true },
+    ]);
+
+    let mut value = GenericEnum::<bool, bool>::Unit;
+    let mut session = Session::new();
+
+    for _ in 0..100 {
+        session.mutate(&mut value)?;
+        expected.remove(&value);
+        if expected.is_empty() {
+            break;
+        }
+    }
+
     Ok(())
 }
