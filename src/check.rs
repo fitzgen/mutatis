@@ -306,6 +306,10 @@ impl Check {
     /// A check always runs at least this many iterations, even when that means
     /// exceeding the configured [maximum duration][Check::max_duration] or
     /// [maximum number of iterations][Check::max_iters].
+    ///
+    /// The one exception is an exhausted mutator: a check cannot keep going
+    /// when there is nothing left to mutate. See
+    /// [`run_with`][Check::run_with].
     pub fn min_iters(&mut self, min_iters: usize) -> &mut Check {
         self.min_iters = Some(min_iters);
         self
@@ -482,7 +486,13 @@ impl Check {
     /// iteration and duration limits; see [the module-level
     /// documentation][crate::check#iteration-and-duration-limits]. The duration
     /// limits cover this whole method, including checking the initial corpus,
-    /// but only mutated values count towards the iteration limits.
+    /// but only mutated values count towards the iteration limits: one
+    /// iteration is one property evaluation on one mutated value.
+    ///
+    /// If, in the process of running checks, the mutator exhausts all potential
+    /// mutations it can apply to the corpus, then `run_with` stops and reports
+    /// success, even if the minimum iteration count or duration have not been
+    /// met.
     pub fn run_with<M, T, S>(
         &self,
         mut mutator: M,
@@ -533,7 +543,6 @@ impl Check {
                     break;
                 }
             }
-            iters += 1;
 
             let index = session.context.rng().gen_index(corpus.len()).unwrap();
 
@@ -544,6 +553,7 @@ impl Check {
                     if corpus.is_empty() {
                         return Ok(());
                     }
+                    continue;
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -551,6 +561,8 @@ impl Check {
             if let Err(msg) = Self::check_one(&corpus[index], &mut property) {
                 return self.shrink(mutator, corpus[index].clone(), property, msg);
             }
+
+            iters += 1;
         }
 
         Ok(())
@@ -675,6 +687,18 @@ mod tests {
             Ok(())
         } else {
             Err("expected < 10")
+        }
+    }
+
+    /// A mutator that is exhausted for zero and otherwise increments the value.
+    struct ExhaustedForZero;
+
+    impl Mutate<u32> for ExhaustedForZero {
+        fn mutate(&mut self, c: &mut Candidates<'_>, value: &mut u32) -> crate::Result<()> {
+            if *value == 0 {
+                return Ok(());
+            }
+            c.mutation(|_| Ok(*value += 1))
         }
     }
 
@@ -825,6 +849,49 @@ mod tests {
 
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), CheckError::EmptyCorpus));
+    }
+
+    #[test]
+    fn check_run_with_exhausted_value_is_dropped_and_not_rechecked() {
+        const ITERS: usize = 100;
+
+        // The exhausted value is last in the corpus, so dropping it from the
+        // corpus leaves the index we chose out of bounds.
+        let mut seen = Vec::new();
+        check()
+            .iters(ITERS)
+            .run_with(ExhaustedForZero, [1, 0], |x: &u32| -> Result<(), String> {
+                seen.push(*x);
+                Ok(())
+            })
+            .unwrap();
+
+        // Two values in the initial corpus, plus one property check per
+        // iteration: an exhausted mutation does not consume an iteration.
+        assert_eq!(seen.len(), 2 + ITERS);
+
+        // Every mutation increments, and a dropped value is never checked
+        // again, so we should never see the same value twice.
+        let mut sorted = seen.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), seen.len(), "checked a value twice: {seen:?}");
+    }
+
+    #[test]
+    fn check_run_with_exhausted_corpus_succeeds() {
+        // `m::unit()` is always exhausted, so the corpus empties out and the
+        // check stops early, before reaching any of its limits.
+        let mut calls = 0_usize;
+        check()
+            .run_with(m::unit(), [(), ()], |_: &()| -> Result<(), String> {
+                calls += 1;
+                Ok(())
+            })
+            .unwrap();
+
+        // Once per initial corpus value, and zero mutation iterations.
+        assert_eq!(calls, 2);
     }
 
     #[test]
