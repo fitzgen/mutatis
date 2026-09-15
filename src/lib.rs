@@ -1691,10 +1691,12 @@ pub trait Generate<T>: Mutate<T> {
 
 /// A mutator that supports clamping mutated values to within a given range.
 ///
-/// To use `MutateInRange` implementations, use the
-/// `[Session::mutate_in_range]` method,
-/// `[Session::mutate_in_range_with]` method, or
-/// [`mutators::range()`][crate::mutators::range] combinator.
+/// `MutateInRange` implementations are not used directly. Wrap one in the
+/// [`mrange`][crate::mutators::mrange] combinator, which pairs a range with a
+/// type's default mutator, or in [`range_with`][crate::mutators::range_with] to
+/// supply the inner mutator yourself. Either way the result is an ordinary
+/// [`Mutate`] that can be passed to [`Session::mutate`] or
+/// [`Session::mutate_with`].
 pub trait MutateInRange<T>: Mutate<T> {
     /// Mutate a value, ensuring that the resulting mutation is within the given
     /// range.

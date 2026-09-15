@@ -694,6 +694,44 @@ mod tests {
         }
     }
 
+    #[test]
+    fn check_shrinking_negative_ints() {
+        let failure = check()
+            .max_shrink_iters(1000)
+            .run_with(m::i32(), [-1i32, i32::MIN], |x: &i32| {
+                if *x >= 0 {
+                    Ok(())
+                } else {
+                    Err("negative")
+                }
+            })
+            .unwrap_err()
+            .unwrap_failed();
+
+        assert!(
+            failure.value < 0,
+            "{} is not a counterexample",
+            failure.value
+        );
+    }
+
+    #[test]
+    fn check_shrinking_out_of_range() {
+        let failure = check()
+            .max_shrink_iters(1000)
+            .run_with(m::mrange(10i32..=20i32), [5i32], |_: &i32| {
+                Err::<(), &str>("always fails")
+            })
+            .unwrap_err()
+            .unwrap_failed();
+
+        assert!(
+            (10..=20).contains(&failure.value),
+            "{} escaped the mutator's range",
+            failure.value
+        );
+    }
+
     /// A mutator that is exhausted for zero and otherwise increments the value.
     struct ExhaustedForZero;
 
