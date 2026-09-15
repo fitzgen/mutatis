@@ -133,7 +133,12 @@ for _ in 0..4 {
 * [`Context::shrink`][crate::Context::shrink]: While applying a mutation, check
   whether the current mutation should only shrink the original value.
 
-* [`Check::shrink_iters`][crate::check::Check::shrink_iters]: Configure the
-  number of attempts to shrink a failing input before reporting the failure.
+* [`Check::max_shrink_iters`][crate::check::Check::max_shrink_iters]: Configure
+  the maximum number of attempts to shrink a failing input before reporting the
+  failure.
+
+* [`Check::max_shrink_duration`][crate::check::Check::max_shrink_duration]:
+  Configure the maximum amount of time to spend shrinking a failing input before
+  reporting the failure.
 
  */

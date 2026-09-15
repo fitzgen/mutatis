@@ -25,8 +25,8 @@
 //!
 //! Now your `cargo test`s are exercising not only the subset of the state space
 //! you explicitly described in those finite inputs, but also everything
-//! reachable from mutating those inputs (bounded by the configured number of
-//! check iterations). Additionally, you can assert these same properties and
+//! reachable from mutating those inputs (bounded by the configured iteration
+//! and duration limits). Additionally, you can assert these same properties and
 //! invariants are upheld 24/7 with a coverage-guided fuzzer like `libfuzzer` to
 //! explore the state space even more thoroughly.
 //!
@@ -36,15 +36,20 @@
 //! #[cfg(test)]
 //! mod tests {
 //!     use mutatis::{check::Check, mutators as m};
+//!     use std::time::Duration;
 //!
 //!     #[test]
 //!     fn test_rgb_to_hsl_to_rgb_round_trip() {
 //!         let result = Check::new()
-//!             // Check the property on 1000 mutated values.
-//!             .iters(1000)
+//!             // Check the property on at least 1000 mutated values, and keep
+//!             // going for at least 100 milliseconds...
+//!             .min_iters(1000)
+//!             .min_duration(Duration::from_millis(100))
+//!             // ...but never spend longer than a second on it.
+//!             .max_duration(Duration::from_secs(1))
 //!             // If we find a failing test case, try to shrink it down to a
-//!             // minimal failing test case by running 1000 shrink iterations.
-//!             .shrink_iters(1000)
+//!             // minimal failing test case with up to 1000 shrink iterations.
+//!             .max_shrink_iters(1000)
 //!             // Run the property check!
 //!             .run_with(
 //!                 // The mutator we'll use to generate new values.
@@ -74,6 +79,26 @@
 //! # fn hsl_to_rgb(h: u8, s: u8, l: u8) -> [u8; 3] { [0, 0, 0] }
 //! }
 //! ```
+//!
+//! # Iteration and Duration Limits
+//!
+//! You can apply both minimum and maximum bounds to the amount of work a
+//! [`Check`] does. It can be the case that these configured bounds conflict:
+//! for example, the minimum number of iterations has not been satisfied but the
+//! maximum wall-time duration has been exceeded. In these cases, **the minimums
+//! always take priority**, so you don't silently do less checking on a slow
+//! machine (e.g. in CI or when running under MIRI).
+//!
+//! For more details, see:
+//!
+//! * [`Check::min_iters`]
+//! * [`Check::max_iters`]
+//! * [`Check::iters`]
+//! * [`Check::min_duration`]
+//! * [`Check::max_duration`]
+//! * [`Check::duration`]
+//! * [`Check::max_shrink_iters`]
+//! * [`Check::max_shrink_duration`]
 
 use super::*;
 use crate::log;
@@ -81,6 +106,13 @@ use crate::mutators as m;
 use std::fmt::{self, Debug};
 use std::panic;
 use std::prelude::v1::*;
+use std::time::{Duration, Instant};
+
+const DEFAULT_MIN_ITERS: usize = 1000;
+const DEFAULT_MAX_DURATION: Duration = Duration::from_secs(1);
+
+const DEFAULT_MAX_FACTOR: u32 = 10;
+const DEFAULT_SHRINK_FACTOR: u32 = 4;
 
 /// The result of running a check.
 ///
@@ -240,8 +272,12 @@ impl<T> std::error::Error for CheckFailure<T> where T: Debug {}
 /// See [the module-level documentation][crate::check] for example usage.
 #[derive(Debug)]
 pub struct Check {
-    iters: usize,
-    shrink_iters: usize,
+    min_iters: Option<usize>,
+    max_iters: Option<usize>,
+    min_duration: Option<Duration>,
+    max_duration: Option<Duration>,
+    max_shrink_iters: Option<usize>,
+    max_shrink_duration: Option<Duration>,
     seed: Option<u64>,
 }
 
@@ -255,23 +291,141 @@ impl Check {
     /// Create a new `Check`.
     pub fn new() -> Check {
         Check {
-            iters: 1000,
-            shrink_iters: 1000,
+            min_iters: None,
+            max_iters: None,
+            min_duration: None,
+            max_duration: None,
+            max_shrink_iters: None,
+            max_shrink_duration: None,
             seed: None,
         }
     }
 
-    /// Configure the number of test iterations to run.
-    pub fn iters(&mut self, iters: usize) -> &mut Check {
-        self.iters = iters;
+    /// Configure the minimum number of test iterations to run.
+    ///
+    /// A check always runs at least this many iterations, even when that means
+    /// exceeding the configured [maximum duration][Check::max_duration] or
+    /// [maximum number of iterations][Check::max_iters].
+    pub fn min_iters(&mut self, min_iters: usize) -> &mut Check {
+        self.min_iters = Some(min_iters);
         self
     }
 
-    /// Configure the number of attempts to shrink a failing input before
-    /// reporting the failure.
-    pub fn shrink_iters(&mut self, shrink_iters: usize) -> &mut Check {
-        self.shrink_iters = shrink_iters;
+    /// Configure the maximum number of test iterations to run.
+    ///
+    /// Once the minimum number of iterations and the minimum duration have both
+    /// been reached, a check stops as soon as it has run this many iterations.
+    pub fn max_iters(&mut self, max_iters: usize) -> &mut Check {
+        self.max_iters = Some(max_iters);
         self
+    }
+
+    /// Configure the exact number of test iterations to run.
+    ///
+    /// This is shorthand for setting both the [minimum][Check::min_iters] and
+    /// [maximum][Check::max_iters] number of iterations to the same value.
+    pub fn iters(&mut self, iters: usize) -> &mut Check {
+        self.min_iters(iters).max_iters(iters)
+    }
+
+    /// Configure the minimum duration to run the check for.
+    ///
+    /// A check always runs for at least this long, even when that means
+    /// exceeding the configured [maximum number of
+    /// iterations][Check::max_iters] or [maximum
+    /// duration][Check::max_duration].
+    pub fn min_duration(&mut self, min_duration: Duration) -> &mut Check {
+        self.min_duration = Some(min_duration);
+        self
+    }
+
+    /// Configure the maximum duration to run the check for.
+    ///
+    /// Once the minimum number of iterations and the minimum duration have both
+    /// been reached, a check stops as soon as it has run for this long.
+    ///
+    /// Note that this does not interrupt an in-progress property evaluation;
+    /// the limit is only checked between iterations.
+    pub fn max_duration(&mut self, max_duration: Duration) -> &mut Check {
+        self.max_duration = Some(max_duration);
+        self
+    }
+
+    /// Configure the exact duration to run the check for.
+    ///
+    /// This is shorthand for setting both the [minimum][Check::min_duration]
+    /// and [maximum][Check::max_duration] duration to the same value.
+    pub fn duration(&mut self, duration: Duration) -> &mut Check {
+        self.min_duration(duration).max_duration(duration)
+    }
+
+    /// Configure the maximum number of attempts to shrink a failing input
+    /// before reporting the failure.
+    ///
+    /// Shrinking has no minimums: it stops as soon as it hits this limit, the
+    /// [maximum shrink duration][Check::max_shrink_duration], or an exhausted
+    /// mutator.
+    ///
+    /// Setting this to zero disables shrinking.
+    pub fn max_shrink_iters(&mut self, max_shrink_iters: usize) -> &mut Check {
+        self.max_shrink_iters = Some(max_shrink_iters);
+        self
+    }
+
+    /// Configure the maximum duration to spend shrinking a failing input before
+    /// reporting the failure.
+    ///
+    /// Shrinking has no minimums: it stops as soon as it hits this limit, the
+    /// [maximum number of shrink iterations][Check::max_shrink_iters], or an
+    /// exhausted mutator.
+    ///
+    /// Setting this to zero disables shrinking.
+    pub fn max_shrink_duration(&mut self, max_shrink_duration: Duration) -> &mut Check {
+        self.max_shrink_duration = Some(max_shrink_duration);
+        self
+    }
+
+    #[deprecated(since = "0.5.4", note = "renamed to `Check::max_shrink_iters`")]
+    #[doc(hidden)]
+    pub fn shrink_iters(&mut self, shrink_iters: usize) -> &mut Check {
+        self.max_shrink_iters(shrink_iters)
+    }
+
+    fn min_iters_or_default(&self) -> usize {
+        self.min_iters.unwrap_or(DEFAULT_MIN_ITERS)
+    }
+
+    fn max_iters_or_default(&self) -> usize {
+        self.max_iters.unwrap_or_else(|| {
+            self.min_iters_or_default()
+                .saturating_mul(DEFAULT_MAX_FACTOR as usize)
+        })
+    }
+
+    fn min_duration_or_default(&self) -> Duration {
+        self.min_duration.unwrap_or(Duration::ZERO)
+    }
+
+    fn max_duration_or_default(&self) -> Duration {
+        self.max_duration.unwrap_or_else(|| {
+            self.min_duration.map_or(DEFAULT_MAX_DURATION, |min| {
+                min.saturating_mul(DEFAULT_MAX_FACTOR)
+            })
+        })
+    }
+
+    fn max_shrink_iters_or_default(&self) -> usize {
+        self.max_shrink_iters.unwrap_or_else(|| {
+            self.min_iters_or_default()
+                .saturating_mul(DEFAULT_SHRINK_FACTOR as usize)
+        })
+    }
+
+    fn max_shrink_duration_or_default(&self) -> Duration {
+        self.max_shrink_duration.unwrap_or_else(|| {
+            self.max_duration_or_default()
+                .saturating_mul(DEFAULT_SHRINK_FACTOR)
+        })
     }
 
     /// Configure the RNG seed used for mutation.
@@ -317,10 +471,18 @@ impl Check {
     /// the given corpus.
     ///
     /// The `property` is the function that is called for each value in the
-    /// corpus and for each mutated value. If the property returns an error, the
-    /// check is considered to have failed and the failing value is shrunk down
-    /// to a minimal failing value. You can configure how much effor is put into
-    /// shrinking via the [`shrink_iters`][Check::shrink_iters] method.
+    /// corpus and for each mutated value. If the property returns an error or
+    /// panics, the check is considered to have failed and the failing input
+    /// value is shrunk down to a minimal failing value. You can configure how
+    /// much effort is put into shrinking via the
+    /// [`max_shrink_iters`][Check::max_shrink_iters] and
+    /// [`max_shrink_duration`][Check::max_shrink_duration] methods.
+    ///
+    /// How many mutated values are checked is determined by the configured
+    /// iteration and duration limits; see [the module-level
+    /// documentation][crate::check#iteration-and-duration-limits]. The duration
+    /// limits cover this whole method, including checking the initial corpus,
+    /// but only mutated values count towards the iteration limits.
     pub fn run_with<M, T, S>(
         &self,
         mut mutator: M,
@@ -332,6 +494,8 @@ impl Check {
         T: Clone + Debug,
         S: ToString,
     {
+        let start = Instant::now();
+
         let mut corpus = initial_corpus.into_iter().collect::<Vec<_>>();
         if corpus.is_empty() {
             return Err(CheckError::EmptyCorpus);
@@ -345,13 +509,32 @@ impl Check {
             }
         }
 
-        // Second, run the check on mutated values derived from the corpus for
-        // the configured iterations.
+        // Second, run the check on mutated values derived from the corpus
+        // until our configured iteration and duration limits say we are done.
         let mut session = match self.seed {
             Some(seed) => Session::new().seed(seed),
             None => Session::new(),
         };
-        for _ in 0..self.iters {
+
+        let min_iters = self.min_iters_or_default();
+        let max_iters = self.max_iters_or_default();
+        let min_duration = self.min_duration_or_default();
+        let max_duration = self.max_duration_or_default();
+
+        let mut iters = 0_usize;
+        loop {
+            // We keep going while any minimum is unmet, and otherwise until we
+            // reach a maximum.
+            if iters >= min_iters {
+                let elapsed = start.elapsed();
+                let mins_met = elapsed >= min_duration;
+                let max_reached = iters >= max_iters || elapsed >= max_duration;
+                if mins_met && max_reached {
+                    break;
+                }
+            }
+            iters += 1;
+
             let index = session.context.rng().gen_index(corpus.len()).unwrap();
 
             match session.mutate_with(&mut mutator, &mut corpus[index]) {
@@ -400,19 +583,29 @@ impl Check {
         T: Clone + Debug,
         S: ToString,
     {
+        let start = Instant::now();
+
         log::warn!("failed on input {value:?}: {message}");
-        if self.shrink_iters == 0 {
+
+        let max_shrink_iters = self.max_shrink_iters_or_default();
+        let max_shrink_duration = self.max_shrink_duration_or_default();
+        if max_shrink_iters == 0 || max_shrink_duration.is_zero() {
             return Err(CheckFailure { value, message }.into());
         }
 
-        log::debug!("shrinking for {} iters...", self.shrink_iters);
+        log::debug!("shrinking for up to {max_shrink_iters} iters or {max_shrink_duration:?}...");
 
         let mut session = match self.seed {
             Some(seed) => Session::new().seed(seed).shrink(true),
             None => Session::new().shrink(true),
         };
 
-        for _ in 0..self.shrink_iters {
+        for _ in 0..max_shrink_iters {
+            if start.elapsed() >= max_shrink_duration {
+                log::debug!("reached maximum shrink duration; stopping shrinking");
+                break;
+            }
+
             let mut candidate = value.clone();
 
             match session.mutate_with(&mut mutator, &mut candidate) {
@@ -456,6 +649,138 @@ mod tests {
     fn check() -> Check {
         let _ = env_logger::builder().is_test(true).try_init();
         Check::new()
+    }
+
+    /// Run `check` over a trivially-passing property, sleeping for `delay` on
+    /// each call, and return the number of mutation iterations it performed.
+    fn count_iters(check: &mut Check, delay: Duration) -> usize {
+        let mut calls = 0_usize;
+        check
+            .run_with(m::u32(), [0u32], |_: &u32| -> Result<(), String> {
+                calls += 1;
+                if !delay.is_zero() {
+                    std::thread::sleep(delay);
+                }
+                Ok(())
+            })
+            .unwrap();
+        // The first call is the initial corpus's single value, which does not
+        // count as a mutation iteration.
+        calls - 1
+    }
+
+    /// A property that fails for every value greater than or equal to ten.
+    fn less_than_ten(x: &u8) -> Result<(), &'static str> {
+        if *x < 10 {
+            Ok(())
+        } else {
+            Err("expected < 10")
+        }
+    }
+
+    #[test]
+    fn check_iters_is_exact() {
+        assert_eq!(count_iters(check().iters(37), Duration::ZERO), 37);
+    }
+
+    #[test]
+    fn check_min_iters_beats_max_iters() {
+        let iters = count_iters(check().min_iters(25).max_iters(5), Duration::ZERO);
+        assert_eq!(iters, 25);
+    }
+
+    #[test]
+    fn check_min_iters_beats_max_duration() {
+        let iters = count_iters(
+            check().min_iters(10).max_duration(Duration::from_millis(1)),
+            Duration::from_millis(1),
+        );
+        assert_eq!(iters, 10);
+    }
+
+    #[test]
+    fn check_min_duration_runs_past_min_iters() {
+        let min_duration = Duration::from_millis(20);
+        let start = Instant::now();
+        let iters = count_iters(
+            check().min_iters(1).min_duration(min_duration),
+            Duration::from_millis(1),
+        );
+        let elapsed = start.elapsed();
+        assert!(elapsed >= min_duration, "only ran for {elapsed:?}");
+        assert!(
+            iters > 1,
+            "ran {iters} iters, expected more than min_iters=1"
+        );
+    }
+
+    #[test]
+    fn check_duration_runs_for_at_least_that_long() {
+        let duration = Duration::from_millis(20);
+        let start = Instant::now();
+        count_iters(check().min_iters(0).duration(duration), Duration::ZERO);
+        let elapsed = start.elapsed();
+        assert!(elapsed >= duration, "only ran for {elapsed:?}");
+    }
+
+    #[test]
+    fn check_max_shrink_duration_bounds_shrinking() {
+        let max_shrink_duration = Duration::from_millis(20);
+        let start = Instant::now();
+
+        // Without the duration limit, an unlimited shrink iteration count
+        // would never terminate.
+        let failure = check()
+            .max_shrink_iters(usize::MAX)
+            .max_shrink_duration(max_shrink_duration)
+            .run_with(m::u8(), [u8::MAX], less_than_ten)
+            .unwrap_err()
+            .unwrap_failed();
+
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= max_shrink_duration,
+            "only shrank for {elapsed:?}"
+        );
+
+        // How far shrinking gets in a fixed amount of time depends on how fast
+        // the machine is, so only assert that it made some progress.
+        assert!(
+            (10..u8::MAX).contains(&failure.value),
+            "shrank to {}, expected something in 10..255",
+            failure.value
+        );
+    }
+
+    #[test]
+    fn check_zero_max_shrink_iters_disables_shrinking() {
+        let failure = check()
+            .max_shrink_iters(0)
+            .run_with(m::u8(), [u8::MAX], less_than_ten)
+            .unwrap_err()
+            .unwrap_failed();
+        assert_eq!(failure.value, u8::MAX);
+    }
+
+    #[test]
+    fn check_zero_max_shrink_duration_disables_shrinking() {
+        let failure = check()
+            .max_shrink_duration(Duration::ZERO)
+            .run_with(m::u8(), [u8::MAX], less_than_ten)
+            .unwrap_err()
+            .unwrap_failed();
+        assert_eq!(failure.value, u8::MAX);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn deprecated_shrink_iters_sets_max_shrink_iters() {
+        let failure = check()
+            .shrink_iters(0)
+            .run_with(m::u8(), [u8::MAX], less_than_ten)
+            .unwrap_err()
+            .unwrap_failed();
+        assert_eq!(failure.value, u8::MAX);
     }
 
     #[test]
@@ -505,7 +830,7 @@ mod tests {
     #[test]
     fn check_run_with_fail_and_shrink() {
         let failure = check()
-            .shrink_iters(1000)
+            .max_shrink_iters(1000)
             .run_with(m::u8(), [u8::MAX], |x: &u8| {
                 if *x < 10 {
                     Ok(())
@@ -532,7 +857,7 @@ mod tests {
     #[test]
     fn check_run_with_fail_on_panic_and_shrink() {
         let failure = check()
-            .shrink_iters(1000)
+            .max_shrink_iters(1000)
             .run_with(m::u8(), [u8::MAX], |x: &u8| -> Result<(), String> {
                 assert!(*x < 10);
                 Ok(())

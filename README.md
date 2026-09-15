@@ -248,8 +248,8 @@ mod tests {
     #[test]
     fn test_that_addition_commutes() {
         Check::new()
-            .iters(1000)
-            .shrink_iters(1000)
+            .min_iters(1000)
+            .max_shrink_iters(1000)
             .run(|(a, b): &(i32, i32)| {
                 if a + b == b + a {
                     Ok(())
