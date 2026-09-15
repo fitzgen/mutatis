@@ -241,25 +241,24 @@ continuous fuzzing.
 
 ```rust
 # #[cfg(feature = "check")]
-#[cfg(test)]
-mod tests {
+// Put this in your crate's `#[cfg(test)] mod tests` and annotate it with
+// `#[test]`.
+fn test_that_addition_commutes() {
     use mutatis::check::Check;
 
-    #[test]
-    fn test_that_addition_commutes() {
-        Check::new()
-            .min_iters(1000)
-            .max_shrink_iters(1000)
-            .run(|(a, b): &(i32, i32)| {
-                if a + b == b + a {
-                    Ok(())
-                } else {
-                    Err("addition is not commutative!")
-                }
-            })
-            .unwrap();
-    }
+    Check::new()
+        .min_iters(1000)
+        .max_shrink_iters(1000)
+        .run(|(a, b): &(i32, i32)| {
+            if a.wrapping_add(*b) == b.wrapping_add(*a) {
+                Ok(())
+            } else {
+                Err("addition is not commutative!")
+            }
+        })
+        .unwrap();
 }
+# #[cfg(feature = "check")] test_that_addition_commutes();
 ```
 
 See [the `check` module's

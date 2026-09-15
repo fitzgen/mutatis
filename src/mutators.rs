@@ -162,7 +162,7 @@ where
 
 /// A mutator for `T` values within a given range.
 ///
-/// See the [`range`] function to create new `Range` mutator instances and for
+/// See the [`mrange`] function to create new `MRange` mutator instances and for
 /// example usage.
 #[derive(Clone, Debug)]
 pub struct MRange<M, T> {
@@ -194,7 +194,7 @@ where
     MRange { mutator, range }
 }
 
-/// Like [`range`] but uses the given `mutator` rather than the `T`'s default
+/// Like [`mrange`] but uses the given `mutator` rather than the `T`'s default
 /// mutator.
 pub fn range_with<M, T>(range: ops::RangeInclusive<T>, mutator: M) -> MRange<M, T> {
     MRange { mutator, range }

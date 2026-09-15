@@ -844,10 +844,14 @@ where
     /// Return the number of mutations that [`mutate`][Mutate::mutate] would
     /// register for the given `value`.
     ///
-    /// The default implementation returns `u32::MAX`, which signals that the
+    /// The default implementation returns `None`, which signals that the
     /// count is unknown and the framework should fall back to a counting pass
     /// through [`mutate`][Mutate::mutate]. Implementations that can compute
-    /// the count cheaply should override this method.
+    /// the count cheaply should override this method and return `Some(count)`.
+    ///
+    /// Given the same `value` and `shrink`, [`mutate`][Mutate::mutate] must
+    /// register exactly `count` candidate mutations, and must do so
+    /// deterministically. Failure to uphold this contract may panic.
     #[inline]
     fn mutation_count(&self, value: &T, shrink: bool) -> Option<u32> {
         let _ = (value, shrink);

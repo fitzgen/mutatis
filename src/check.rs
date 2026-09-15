@@ -33,51 +33,51 @@
 //! # Example
 //!
 //! ```
-//! #[cfg(test)]
-//! mod tests {
-//!     use mutatis::{check::Check, mutators as m};
-//!     use std::time::Duration;
+//! use mutatis::{check::Check, mutators as m};
+//! use std::time::Duration;
 //!
-//!     #[test]
-//!     fn test_rgb_to_hsl_to_rgb_round_trip() {
-//!         let result = Check::new()
-//!             // Check the property on at least 1000 mutated values, and keep
-//!             // going for at least 100 milliseconds...
-//!             .min_iters(1000)
-//!             .min_duration(Duration::from_millis(100))
-//!             // ...but never spend longer than a second on it.
-//!             .max_duration(Duration::from_secs(1))
-//!             // If we find a failing test case, try to shrink it down to a
-//!             // minimal failing test case with up to 1000 shrink iterations.
-//!             .max_shrink_iters(1000)
-//!             // Run the property check!
-//!             .run_with(
-//!                 // The mutator we'll use to generate new values.
-//!                 m::array(m::range(0..=0xff)),
-//!                 // The initial corpus of values to check and to derive new
-//!                 // inputs from via mutation.
-//!                 [
-//!                     [0x00, 0x00, 0x00],
-//!                     [0xff, 0xff, 0xff],
-//!                     [0x66, 0x33, 0x99],
-//!                 ],
-//!                 // The property to check: RGB -> HSL -> RGB should be the
-//!                 // identity function.
-//!                 |[r, g, b]| {
-//!                     let [h, s, l] = rgb_to_hsl(*r, *g, *b);
-//!                     let [r2, g2, b2] = hsl_to_rgb(h, s, l);
-//!                     if [*r, *g, *b] == [r2, g2, b2] {
-//!                         Ok(())
-//!                     } else {
-//!                         Err("round-trip conversion failed!")
-//!                     }
-//!                 },
-//!             );
-//!         assert!(result.is_ok());
-//!     }
-//! # fn rgb_to_hsl(r: u8, g: u8, b: u8) -> [u8; 3] { [0, 0, 0] }
-//! # fn hsl_to_rgb(h: u8, s: u8, l: u8) -> [u8; 3] { [0, 0, 0] }
+//! // Put this in your crate's `#[cfg(test)] mod tests` and annotate it with
+//! // `#[test]`.
+//! fn test_rgb_to_hsl_to_rgb_round_trip() {
+//!     let result = Check::new()
+//!         // Check the property on at least 1000 mutated values, and keep
+//!         // going for at least 100 milliseconds...
+//!         .min_iters(1000)
+//!         .min_duration(Duration::from_millis(100))
+//!         // ...but never spend longer than a second on it.
+//!         .max_duration(Duration::from_secs(1))
+//!         // If we find a failing test case, try to shrink it down to a
+//!         // minimal failing test case with up to 1000 shrink iterations.
+//!         .max_shrink_iters(1000)
+//!         // Run the property check!
+//!         .run_with(
+//!             // The mutator we'll use to generate new values.
+//!             m::array(m::mrange(0x00u8..=0xffu8)),
+//!             // The initial corpus of values to check and to derive new
+//!             // inputs from via mutation.
+//!             [
+//!                 [0x00, 0x00, 0x00],
+//!                 [0xff, 0xff, 0xff],
+//!                 [0x66, 0x33, 0x99],
+//!             ],
+//!             // The property to check: RGB -> HSL -> RGB should be the
+//!             // identity function.
+//!             |[r, g, b]| {
+//!                 let [h, s, l] = rgb_to_hsl(*r, *g, *b);
+//!                 let [r2, g2, b2] = hsl_to_rgb(h, s, l);
+//!                 if [*r, *g, *b] == [r2, g2, b2] {
+//!                     Ok(())
+//!                 } else {
+//!                     Err("round-trip conversion failed!")
+//!                 }
+//!             },
+//!         );
+//!     assert!(result.is_ok());
 //! }
+//! # // Stand-ins for the real conversions, just so that this example runs.
+//! # fn rgb_to_hsl(r: u8, g: u8, b: u8) -> [u8; 3] { [r, g, b] }
+//! # fn hsl_to_rgb(h: u8, s: u8, l: u8) -> [u8; 3] { [h, s, l] }
+//! # test_rgb_to_hsl_to_rgb_round_trip();
 //! ```
 //!
 //! # Iteration and Duration Limits
@@ -118,12 +118,16 @@ const DEFAULT_SHRINK_FACTOR: u32 = 4;
 ///
 /// If the check passes, this is `Ok(())`.
 ///
-/// If the check fails, this is `Err(CheckError::Failed(_))` with the failing
-/// test case and an error message.
+/// If the check fails, this is `Err(`[`CheckError::Failed`]`(_))` with the
+/// failing test case and an error message.
+///
+/// If the initial corpus is empty, this is
+/// `Err(`[`CheckError::EmptyCorpus`]`)`.
 ///
 /// If there is some other kind of error while running the check, for example if
-/// a `Mutator` does not support the given `Context` configuration, then
-/// this is `Err(CheckError::Error(_))`.
+/// a [`Mutate`] implementation does not support the given [`Session`]
+/// configuration, then this is
+/// `Err(`[`CheckError::MutatorError`]`(_))`.
 pub type CheckResult<T> = std::result::Result<(), CheckError<T>>;
 
 /// An error when running a `Check`.
