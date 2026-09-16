@@ -8,13 +8,8 @@ keywords = ["arbitrary", "fuzzing", "fuzzer", "mutation", "testing"]
 license = "MIT OR Apache-2.0"
 name = "mutatis"
 readme = "README.md"
-
-# XXX: Keep this in sync with the version in `derive/Cargo.toml`.
-version = "0.5.3"
-
-# XXX: Keep this in sync with the MSRV documented in `src/_guide/msrv.rs` and
-# the `rust-version` in `derive/Cargo.toml`.
-rust-version = "1.91.0"
+version.workspace = true
+rust-version.workspace = true
 
 [features]
 # Implement `Mutator`s for types in Rust's `alloc` crate and internally use
@@ -41,7 +36,7 @@ all-features = true
 
 [dependencies]
 rand = { version = "0.8.5", default-features = false, features = ["small_rng"] }
-mutatis-derive = { version = "=0.5.3", path = "derive", optional = true }
+mutatis-derive = { version = "=0.5.4", path = "derive", optional = true }
 log = { version = "0.4.22", optional = true }
 
 [dev-dependencies]
@@ -50,3 +45,5 @@ env_logger = "0.11.5"
 libfuzzer-sys = "0.4.7"
 
 [workspace]
+package.version = "0.5.4"
+package.rust-version = "1.91.0"

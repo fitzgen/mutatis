@@ -4,13 +4,8 @@ description = "Implementation of `derive(mutatis::Mutator)`. Use this via the `d
 edition = "2021"
 license = "MIT OR Apache-2.0"
 name = "mutatis-derive"
-
-# XXX: Keep this in sync with the version in `Cargo.toml`.
-version = "0.5.3"
-
-# XXX: Keep this in sync with the MSRV documented in `README.md` and the
-# `rust-version` in `derive/Cargo.toml`.
-rust-version = "1.80.0"
+version.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 proc-macro2 = "1.0"
