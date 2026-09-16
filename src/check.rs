@@ -866,31 +866,46 @@ mod tests {
 
     #[test]
     fn check_max_shrink_duration_bounds_shrinking() {
-        let max_shrink_duration = Duration::from_millis(20);
-        let start = Instant::now();
+        // Use a flexible shrinking budget to accomodate slow machines and MIRI.
+        const MAX_SHRINK_DURATION_LIMIT: Duration = Duration::from_secs(4);
+        let mut max_shrink_duration = Duration::from_millis(1);
 
-        // Without the duration limit, an unlimited shrink iteration count
-        // would never terminate.
-        let failure = check()
-            .max_shrink_iters(usize::MAX)
-            .max_shrink_duration(max_shrink_duration)
-            .run_with(m::u8(), [u8::MAX], less_than_ten)
-            .unwrap_err()
-            .unwrap_failed();
+        loop {
+            let start = Instant::now();
 
-        let elapsed = start.elapsed();
-        assert!(
-            elapsed >= max_shrink_duration,
-            "only shrank for {elapsed:?}"
-        );
+            // Without the duration limit, an unlimited shrink iteration count
+            // would never terminate.
+            let failure = check()
+                .max_shrink_iters(usize::MAX)
+                .max_shrink_duration(max_shrink_duration)
+                .run_with(m::u8(), [u8::MAX], less_than_ten)
+                .unwrap_err()
+                .unwrap_failed();
 
-        // How far shrinking gets in a fixed amount of time depends on how fast
-        // the machine is, so only assert that it made some progress.
-        assert!(
-            (10..u8::MAX).contains(&failure.value),
-            "shrank to {}, expected something in 10..255",
-            failure.value
-        );
+            // The iteration limit is effectively infinite and `m::u8()` is only
+            // exhausted when shrinking a zero, which never happens because zero
+            // satisfies the property and so is never kept, so shrinking must
+            // have halted due to the time budget.
+            let elapsed = start.elapsed();
+            assert!(
+                elapsed >= max_shrink_duration,
+                "only shrank for {elapsed:?}"
+            );
+
+            // Check that some amount of shrinking happened.
+            if failure.value != u8::MAX {
+                assert!(less_than_ten(&failure.value).is_err());
+                break;
+            }
+
+            assert!(
+                max_shrink_duration < MAX_SHRINK_DURATION_LIMIT,
+                "shrinking never made progress, even given {max_shrink_duration:?}; \
+                 last shrank to {}",
+                failure.value
+            );
+            max_shrink_duration *= 2;
+        }
     }
 
     #[test]
