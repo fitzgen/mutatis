@@ -844,10 +844,14 @@ where
     /// Return the number of mutations that [`mutate`][Mutate::mutate] would
     /// register for the given `value`.
     ///
-    /// The default implementation returns `u32::MAX`, which signals that the
+    /// The default implementation returns `None`, which signals that the
     /// count is unknown and the framework should fall back to a counting pass
     /// through [`mutate`][Mutate::mutate]. Implementations that can compute
-    /// the count cheaply should override this method.
+    /// the count cheaply should override this method and return `Some(count)`.
+    ///
+    /// Given the same `value` and `shrink`, [`mutate`][Mutate::mutate] must
+    /// register exactly `count` candidate mutations, and must do so
+    /// deterministically. Failure to uphold this contract may panic.
     #[inline]
     fn mutation_count(&self, value: &T, shrink: bool) -> Option<u32> {
         let _ = (value, shrink);
@@ -1687,10 +1691,12 @@ pub trait Generate<T>: Mutate<T> {
 
 /// A mutator that supports clamping mutated values to within a given range.
 ///
-/// To use `MutateInRange` implementations, use the
-/// `[Session::mutate_in_range]` method,
-/// `[Session::mutate_in_range_with]` method, or
-/// [`mutators::range()`][crate::mutators::range] combinator.
+/// `MutateInRange` implementations are not used directly. Wrap one in the
+/// [`mrange`][crate::mutators::mrange] combinator, which pairs a range with a
+/// type's default mutator, or in [`range_with`][crate::mutators::range_with] to
+/// supply the inner mutator yourself. Either way the result is an ordinary
+/// [`Mutate`] that can be passed to [`Session::mutate`] or
+/// [`Session::mutate_with`].
 pub trait MutateInRange<T>: Mutate<T> {
     /// Mutate a value, ensuring that the resulting mutation is within the given
     /// range.

@@ -1,6 +1,6 @@
 use super::*;
 use crate::Result;
-use core::{cmp, ops};
+use core::ops;
 
 mod atomic;
 mod cell;
@@ -80,6 +80,21 @@ impl DefaultMutate for bool {
     type DefaultMutate = Bool;
 }
 
+#[inline]
+fn shrink_into_range<T>(rng: &mut crate::Rng, value: T, start: T, end: T) -> T
+where
+    T: Copy + PartialOrd + rand::distributions::uniform::SampleUniform,
+{
+    debug_assert!(start <= end);
+    if value <= start {
+        start
+    } else if value > end {
+        rng.inner().gen_range(start..=end)
+    } else {
+        rng.inner().gen_range(start..value)
+    }
+}
+
 macro_rules! ints {
     (
         $(
@@ -130,7 +145,11 @@ macro_rules! ints {
                     }
                     c.mutation(|ctx| {
                         *value = if ctx.shrink() {
-                            ctx.rng().inner().gen_range(0..*value)
+                            if *value > 0 {
+                                ctx.rng().inner().gen_range(0..*value)
+                            } else {
+                                ctx.rng().inner().gen_range((*value + 1)..=0)
+                            }
                         } else {
                             ctx.rng().$method()
                         };
@@ -175,13 +194,11 @@ macro_rules! ints {
                     }
 
                     c.mutation(|ctx| {
-                        let end = if ctx.shrink() {
-                            cmp::min(*value, end)
+                        *value = if ctx.shrink() {
+                            shrink_into_range(ctx.rng(), *value, start, end)
                         } else {
-                            end
+                            ctx.rng().inner().gen_range(start..=end)
                         };
-
-                        *value = ctx.rng().inner().gen_range(start..=end);
                         Ok(())
                     })
                 }
@@ -335,12 +352,11 @@ impl MutateInRange<char> for Char {
         }
 
         c.mutation(|ctx| {
-            let end = if ctx.shrink() {
-                core::cmp::min(*value, end)
+            *value = if ctx.shrink() {
+                shrink_into_range(ctx.rng(), *value, start, end)
             } else {
-                end
+                ctx.rng().inner().gen_range(start..=end)
             };
-            *value = ctx.rng().inner().gen_range(start..=end);
             Ok(())
         })
     }
@@ -880,4 +896,138 @@ where
     T: DefaultMutate,
 {
     type DefaultMutate = Array<N, T::DefaultMutate>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Session;
+
+    fn shrink_step<T>(mutator: &mut impl Mutate<T>, value: &mut T) -> bool {
+        let mut session = Session::new().shrink(true);
+        match session.mutate_with(mutator, value) {
+            Ok(()) => true,
+            Err(e) if e.is_exhausted() => false,
+            Err(_) => panic!("unexpected mutator error"),
+        }
+    }
+
+    fn assert_shrinks_to_zero<T>(mut mutator: impl Mutate<T>, mut value: T)
+    where
+        T: Copy + Default + PartialOrd + core::fmt::Debug,
+    {
+        let zero = T::default();
+        let mut steps = 0_usize;
+
+        loop {
+            let previous = value;
+            if !shrink_step(&mut mutator, &mut value) {
+                break;
+            }
+
+            steps += 1;
+            assert!(steps < 1000, "shrinking {previous:?} did not terminate");
+
+            if previous < zero {
+                assert!(
+                    value > previous,
+                    "{value:?} is not closer to zero than {previous:?}"
+                );
+                assert!(value <= zero, "{value:?} overshot zero");
+            } else {
+                assert!(
+                    value < previous,
+                    "{value:?} is not closer to zero than {previous:?}"
+                );
+                assert!(value >= zero, "{value:?} overshot zero");
+            }
+        }
+
+        assert!(
+            value == zero,
+            "shrinking stopped at {value:?} rather than zero"
+        );
+    }
+
+    #[test]
+    fn shrink_negative_ints_move_toward_zero() {
+        assert_shrinks_to_zero(i8(), -100i8);
+        assert_shrinks_to_zero(i32(), -100i32);
+        assert_shrinks_to_zero(i128(), -100i128);
+    }
+
+    #[test]
+    fn shrink_positive_ints_move_toward_zero() {
+        assert_shrinks_to_zero(i32(), 100i32);
+        assert_shrinks_to_zero(u32(), 100u32);
+    }
+
+    #[test]
+    fn shrink_int_min_does_not_panic() {
+        let mut value = i32::MIN;
+        assert!(shrink_step(&mut i32(), &mut value));
+        assert!(value > i32::MIN, "{value} did not move");
+        assert!(value <= 0, "{value} overshot zero");
+    }
+
+    #[test]
+    fn shrink_mrange_below_start_clamps_into_range() {
+        let mut value = 5i32;
+        assert!(shrink_step(&mut mrange(10i32..=20i32), &mut value));
+        assert_eq!(value, 10);
+        assert!(!shrink_step(&mut mrange(10i32..=20i32), &mut value));
+    }
+
+    #[test]
+    fn shrink_mrange_unsigned_below_start_clamps_into_range() {
+        let mut value = 5u32;
+        assert!(shrink_step(&mut mrange(10u32..=20u32), &mut value));
+        assert_eq!(value, 10);
+    }
+
+    #[test]
+    fn shrink_mrange_char_below_start_clamps_into_range() {
+        let mut value = 'a';
+        assert!(shrink_step(&mut mrange('m'..='z'), &mut value));
+        assert_eq!(value, 'm');
+    }
+
+    #[test]
+    fn shrink_mrange_makes_strict_progress() {
+        let mut value = 20i32;
+        let mut steps = 0_usize;
+
+        loop {
+            let previous = value;
+            if !shrink_step(&mut mrange(10i32..=20i32), &mut value) {
+                break;
+            }
+            assert!(value < previous, "{value} is not smaller than {previous}");
+            assert!(value >= 10, "{value} escaped the range");
+
+            steps += 1;
+            assert!(steps <= 10, "more steps than the range has values");
+        }
+
+        assert_eq!(value, 10);
+    }
+
+    #[test]
+    fn shrink_mrange_single_point_range() {
+        let mut value = 9i32;
+        assert!(shrink_step(&mut mrange(7i32..=7i32), &mut value));
+        assert_eq!(value, 7);
+        assert!(!shrink_step(&mut mrange(7i32..=7i32), &mut value));
+
+        let mut value = 5i32;
+        assert!(shrink_step(&mut mrange(7i32..=7i32), &mut value));
+        assert_eq!(value, 7);
+    }
+
+    #[test]
+    fn shrink_mrange_above_end_lands_in_range() {
+        let mut value = 50i32;
+        assert!(shrink_step(&mut mrange(10i32..=20i32), &mut value));
+        assert!((10..=20).contains(&value), "{value} escaped the range");
+    }
 }
