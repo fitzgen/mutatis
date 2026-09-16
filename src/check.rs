@@ -114,6 +114,23 @@ const DEFAULT_MAX_DURATION: Duration = Duration::from_secs(1);
 const DEFAULT_MAX_FACTOR: u32 = 10;
 const DEFAULT_SHRINK_FACTOR: u32 = 4;
 
+const SEED_ENV_VAR: &str = "MUTATIS_CHECK_SEED";
+
+fn seed_from_env() -> Option<u64> {
+    match std::env::var(SEED_ENV_VAR) {
+        Ok(s) if s.trim().is_empty() => None,
+        Ok(s) => Some(parse_seed(&s)),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(e) => panic!("{SEED_ENV_VAR}: {e}"),
+    }
+}
+
+fn parse_seed(s: &str) -> u64 {
+    s.trim()
+        .parse()
+        .unwrap_or_else(|e| panic!("{SEED_ENV_VAR}={s:?} is not a valid u64: {e}"))
+}
+
 /// The result of running a check.
 ///
 /// If the check passes, this is `Ok(())`.
@@ -436,10 +453,20 @@ impl Check {
         })
     }
 
+    fn seed_or_default(&self) -> u64 {
+        self.seed
+            .or_else(seed_from_env)
+            .unwrap_or_else(crate::rng::next_default_seed)
+    }
+
     /// Configure the RNG seed used for mutation.
     ///
-    /// By default, the seed is chosen automatically. Use this method to make
-    /// a check deterministically reproducible.
+    /// When this is not set, the `MUTATIS_CHECK_SEED` environment variable is
+    /// consulted; unless empty, it must parse as a `u64` or the check panics.
+    /// Failing that, a seed is chosen automatically.
+    ///
+    /// Every run logs the seed it used at debug level, so a failing check can
+    /// be reproduced by setting it here or in the environment.
     pub fn seed(&mut self, seed: u64) -> &mut Check {
         self.seed = Some(seed);
         self
@@ -525,10 +552,9 @@ impl Check {
 
         // Second, run the check on mutated values derived from the corpus
         // until our configured iteration and duration limits say we are done.
-        let mut session = match self.seed {
-            Some(seed) => Session::new().seed(seed),
-            None => Session::new(),
-        };
+        let seed = self.seed_or_default();
+        log::debug!("using RNG seed {seed}");
+        let mut session = Session::new().seed(seed);
 
         let min_iters = self.min_iters_or_default();
         let max_iters = self.max_iters_or_default();
@@ -611,10 +637,9 @@ impl Check {
 
         log::debug!("shrinking for up to {max_shrink_iters} iters or {max_shrink_duration:?}...");
 
-        let mut session = match self.seed {
-            Some(seed) => Session::new().seed(seed).shrink(true),
-            None => Session::new().shrink(true),
-        };
+        let seed = self.seed_or_default();
+        log::debug!("shrinking with RNG seed {seed}");
+        let mut session = Session::new().seed(seed).shrink(true);
 
         for _ in 0..max_shrink_iters {
             if start.elapsed() >= max_shrink_duration {
@@ -730,6 +755,56 @@ mod tests {
             "{} escaped the mutator's range",
             failure.value
         );
+    }
+
+    #[test]
+    fn parse_seed_accepts_decimal_and_trims() {
+        assert_eq!(parse_seed("42"), 42);
+        assert_eq!(parse_seed(" 42 "), 42);
+        assert_eq!(parse_seed("42\n"), 42);
+        assert_eq!(parse_seed("0"), 0);
+        assert_eq!(parse_seed(&u64::MAX.to_string()), u64::MAX);
+    }
+
+    #[test]
+    #[should_panic(expected = "MUTATIS_CHECK_SEED")]
+    fn parse_seed_rejects_non_numeric() {
+        parse_seed("abc");
+    }
+
+    #[test]
+    #[should_panic(expected = "MUTATIS_CHECK_SEED")]
+    fn parse_seed_rejects_overflow() {
+        // `u64::MAX + 1`.
+        parse_seed("18446744073709551616");
+    }
+
+    #[test]
+    fn seed_env_var_is_consulted() {
+        assert_eq!(std::env::var_os(SEED_ENV_VAR), None);
+
+        // Unset and unconfigured: the default sequence, which advances.
+        assert_ne!(
+            Check::new().seed_or_default(),
+            Check::new().seed_or_default()
+        );
+
+        std::env::set_var(SEED_ENV_VAR, "1234");
+        assert_eq!(Check::new().seed_or_default(), 1234);
+        // An explicit seed still wins.
+        assert_eq!(Check::new().seed(7).seed_or_default(), 7);
+
+        // Set but empty is ignored, so the default sequence resumes.
+        for empty in ["", " ", "\n"] {
+            std::env::set_var(SEED_ENV_VAR, empty);
+            assert_ne!(
+                Check::new().seed_or_default(),
+                Check::new().seed_or_default()
+            );
+        }
+        std::env::remove_var(SEED_ENV_VAR);
+
+        assert_ne!(Check::new().seed_or_default(), 1234);
     }
 
     /// A mutator that is exhausted for zero and otherwise increments the value.

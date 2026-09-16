@@ -16,10 +16,14 @@ pub struct Rng {
     inner: SmallRng,
 }
 
+pub(crate) fn next_default_seed() -> u64 {
+    static DEFAULT_SEED: AtomicU32 = AtomicU32::new(0);
+    DEFAULT_SEED.fetch_add(1, atomic::Ordering::Relaxed).into()
+}
+
 impl Default for Rng {
     fn default() -> Self {
-        static DEFAULT_SEED: AtomicU32 = AtomicU32::new(0);
-        Self::new(DEFAULT_SEED.fetch_add(1, atomic::Ordering::Relaxed).into())
+        Self::new(next_default_seed())
     }
 }
 
